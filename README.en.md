@@ -43,6 +43,21 @@ The UI supports pinning, expansion, current/history selection and overview/proce
 categories. A final reply is separate from task acceptance. State remains in
 `~/Library/Application Support/AgentProgressCard/` for compatibility.
 
+The card shows average output tokens per second for the current turn, calculated from reported
+output usage and elapsed turn time. This includes tool wait time and is not instantaneous model speed.
+An assistant can publish a numbered product choice with:
+
+```bash
+PYTHONPATH=src python3 -m agent_progress_card choice \
+  --question 'Which part first?' --option 'Card UI' --option 'WeChat relay'
+PYTHONPATH=src python3 -m agent_progress_card clear-choice
+```
+
+The choice appears on the card and is queued for the owner's WeChat. Replying `1` or `2` sends the
+selected text to the bound conversation. This does not approve tool or system permissions.
+You can also click a choice on the card. It sends through the local bound Codex session, reports the result,
+and does not require the WeChat relay process.
+
 ## Optional WeChat relay
 
 Keep the card and the matching Codex session open, then run:
@@ -59,6 +74,8 @@ groups or the WeChat database. See [WeChat details](docs/wechat.md).
 The relay inherits the existing session's permissions and never approves requests on your behalf.
 Ordinary text sent to the session incurs normal model usage; polling and local status queries do not.
 Sleep, network loss or stopping the relay interrupts delivery. There is no background startup service.
+After a long idle period, WeChat may require a fresh message from the owner before the bot can send
+queued notifications. Send `进度` to refresh the reply context; the relay prioritizes pending choices.
 Local Codex integration is experimental, historically verified against CLI 0.167.0, not a stable API.
 
 ## Verify

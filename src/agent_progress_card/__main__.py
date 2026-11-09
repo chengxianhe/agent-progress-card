@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .store import ProgressStore
+from .choice import create_choice
 
 
 def main() -> int:
@@ -21,6 +22,10 @@ def main() -> int:
     update.add_argument("--action", required=True)
     update.add_argument("--detail", default="")
     commands.add_parser("read")
+    choice = commands.add_parser("choice")
+    choice.add_argument("--question", required=True)
+    choice.add_argument("--option", action="append", required=True)
+    commands.add_parser("clear-choice")
     args = parser.parse_args()
     store = ProgressStore(args.state_dir)
     try:
@@ -28,6 +33,11 @@ def main() -> int:
             state = store.begin(args.title, args.action, args.replace)
         elif args.command == "update":
             state = store.update(args.task_id, args.status, args.action, args.detail)
+        elif args.command == "choice":
+            state = create_choice(store.directory, args.question, args.option)
+        elif args.command == "clear-choice":
+            (store.directory / "choice.json").unlink(missing_ok=True)
+            state = {"cleared": True}
         else:
             state = store.read()
     except (OSError, ValueError, KeyError, TypeError) as error:

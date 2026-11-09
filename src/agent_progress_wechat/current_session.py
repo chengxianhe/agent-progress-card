@@ -21,10 +21,11 @@ class CurrentSession:
             raise SessionUnavailable("请在桌面打开已绑定的原会话；不会另建聊天")
         return thread
 
-    def prepare(self, connection, text, message_id):
+    def prepare(self, connection, text, message_id, source="wechat"):
         thread = self.inspect(connection)
-        params = {"threadId": self.thread_id, "clientUserMessageId": "wechat-" + message_id,
-                  "input": [{"type": "text", "text": "[来自本人微信的消息]\n" + text}]}
+        label = "[来自小看板的选择]\n" if source == "card" else "[来自本人微信的消息]\n"
+        params = {"threadId": self.thread_id, "clientUserMessageId": source + "-" + message_id,
+                  "input": [{"type": "text", "text": label + text}]}
         if thread["status"]["type"] == "idle":
             return "turn/start", params
         result = connection.call("thread/turns/list", {"threadId": self.thread_id,

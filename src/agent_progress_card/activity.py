@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import OrderedDict
 from datetime import datetime
 
@@ -36,6 +37,10 @@ class ActivityReader:
         self.replay_before = replay_before
         self.last_event_at = 0.0
         self.turn_active = False
+        self.turn_started_at = 0.0
+        self.output_tokens = 0
+        self.output_baseline = None
+        self.output_rate = None
 
     def consume(self, record):
         at = timestamp(record.get("timestamp"))
@@ -45,6 +50,19 @@ class ActivityReader:
         if not isinstance(payload, dict):
             return
         kind = payload.get("type")
+        if record.get("type") == "event_msg" and kind == "token_count":
+            usage = (payload.get("info") or {}).get("total_token_usage") or {}
+            count = usage.get("output_tokens")
+            if self.turn_started_at and isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                if self.output_baseline is None:
+                    last = ((payload.get("info") or {}).get("last_token_usage") or {}).get("output_tokens")
+                    self.output_baseline = max(0, count - last) if isinstance(last, int) and 0 <= last <= count else count
+                if count >= self.output_baseline:
+                    self.output_tokens = count - self.output_baseline
+                    elapsed = at - self.turn_started_at
+                    if elapsed > 0:
+                        self.output_rate = round(self.output_tokens / elapsed, 1)
+            return
         if record.get("type") == "response_item":
             # Only outer tool envelope metadata. Never display script bodies or reasoning.
             call_id = payload.get("call_id")
@@ -63,6 +81,11 @@ class ActivityReader:
             return
         if kind in {"task_started", "task_complete", "turn_aborted"}:
             self.turn_active = kind == "task_started"
+            if kind == "task_started":
+                self.turn_started_at = at
+                self.output_tokens = 0
+                self.output_baseline = None
+                self.output_rate = None
             if not self.turn_active:
                 self.pending.clear()
             self.last_event_at = at
@@ -142,5 +165,6 @@ class ActivityReader:
         return {"version": 1, "thread_id": self.thread_id, "checked_at": checked_at,
                 "last_event_at": self.last_event_at, "error": error,
                 "turn_active": self.turn_active, "commentary": self.commentary,
+                "output_rate": self.output_rate,
                 "notes": list(self.notes.values()), "latest_reply": self.latest_reply,
                 "pending": list(self.pending.values()), "calls": list(self.calls.values())}

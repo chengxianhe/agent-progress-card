@@ -3,15 +3,18 @@ from pathlib import Path
 import socket
 import struct
 import tempfile
+import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from agent_progress_wechat.current_session import CurrentSession, SessionUnavailable
 from agent_progress_wechat.card_binding import register_connection
 from agent_progress_wechat.files import save_json
+from agent_progress_wechat.ilink import LinkError
 from agent_progress_wechat.local_socket import LocalSocket, RpcError, TransportError
 from agent_progress_wechat.relay_mirror import mirror, snapshot, command_reply
-from agent_progress_wechat.relay_service import deliver
+from agent_progress_wechat.relay_service import deliver, run_relay
 from agent_progress_wechat.relay_store import RelayStore
 
 
@@ -196,6 +199,25 @@ class RelayTests(unittest.TestCase):
         binding = json.loads((card / "wechat-source.json").read_text())
         self.assertEqual(binding, {"version": 1, "directory": str(self.root.resolve())})
         self.assertEqual((card / "wechat-source.json").stat().st_mode & 0o777, 0o600)
+
+    def test_expired_login_remains_visible_after_service_stops(self):
+        class ExpiredClient:
+            def __init__(self, credentials):
+                pass
+
+            def updates(self, cursor):
+                raise LinkError("微信接口错误：-14", expired=True)
+
+        self.store.db.close()
+        with patch("agent_progress_wechat.relay_service.Client", ExpiredClient):
+            run_relay(self.root, {"owner": "owner", "token": "secret", "base_url":
+                      "https://ilinkai.weixin.qq.com"}, "thread-1", self.root / "missing.sock", self.root,
+                      threading.Event())
+        state = json.loads((self.root / "connection.json").read_text())
+        self.assertEqual(state["status"], "expired")
+        self.assertIn("重新扫码", state["message"])
+        self.assertNotIn("secret", (self.root / "connection.json").read_text())
+        self.store = RelayStore(self.root, "owner", "thread-1")
 
 
 class FrameTests(unittest.TestCase):

@@ -77,6 +77,7 @@ class RelayStore:
                 if self.db.execute("SELECT 1 FROM inbox WHERE id=?", (identity,)).fetchone():
                     continue
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context',?)", (context,))
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context_at',?)", (str(time.time()),))
                 status = "queued"
                 error = ""
                 if not text:
@@ -107,9 +108,10 @@ class RelayStore:
 
     def outgoing(self):
         with self.lock:
-            if not self.get("context"):
+            if not self.get("context") or time.time() - float(self.get("context_at", "0")) >= 90:
                 return None
-            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND attempts<5 ORDER BY rowid LIMIT 1").fetchone()
+            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND attempts<5 "
+                                  "ORDER BY CASE WHEN id LIKE 'choice:%' THEN 0 ELSE 1 END, rowid LIMIT 1").fetchone()
             return dict(row) if row and row["due"] <= time.time() else None
 
     def sent(self, identity, success):

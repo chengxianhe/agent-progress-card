@@ -6,6 +6,7 @@ from pathlib import Path
 import signal
 import subprocess
 import threading
+import time
 import uuid
 
 from agent_progress_card.store import default_directory
@@ -26,22 +27,38 @@ def main():
     parser.add_argument("--card-dir", type=Path, default=default_directory())
     parser.add_argument("--socket", type=Path, default=Path.home() / ".codex/app-server-control/app-server-control.sock")
     parser.add_argument("--window", type=Path)
+    parser.add_argument("--reconnect", action="store_true", help="停止旧监听并要求本人重新扫码")
     args = parser.parse_args()
     uuid.UUID(args.thread_id)
     os.umask(0o077)
     directory = private_directory(args.state_dir.resolve())
     with (directory / "service.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            parser.error("微信监听已经在运行；先停止旧监听")
+        deadline = time.monotonic() + (45 if args.reconnect else 0)
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if not args.reconnect or time.monotonic() >= deadline:
+                    parser.error("旧微信监听仍在运行；请稍后再试")
+                time.sleep(.5)
         check_binding(args.card_dir, args.thread_id)
+        if args.reconnect:
+            credential_path = directory / "credentials.json"
+            if credential_path.exists():
+                credential_path.replace(directory / ("credentials-backup-" + uuid.uuid4().hex + ".json"))
+            (directory / "reconnect-request").unlink(missing_ok=True)
         session = CurrentSession(args.socket, args.thread_id)
-        connection = session.open()
         try:
-            session.inspect(connection)
-        finally:
-            connection.close()
+            connection = session.open()
+            try:
+                session.inspect(connection)
+            finally:
+                connection.close()
+        except (OSError, ValueError, KeyError, TransportError, RpcError, SessionUnavailable):
+            save_json(directory / "connection.json", {"mode": "current_session", "thread_id": args.thread_id,
+                      "status": "error", "message": "当前 Codex 桌面会话不可用；请打开原会话后重新扫码。"})
+            raise
         (directory / "stop-request").unlink(missing_ok=True)
         stop = threading.Event()
         signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -49,7 +66,7 @@ def main():
 
         def watch():
             while not stop.wait(.5):
-                if (directory / "stop-request").exists():
+                if (directory / "stop-request").exists() or (directory / "reconnect-request").exists():
                     stop.set()
 
         threading.Thread(target=watch, daemon=True).start()
@@ -65,7 +82,7 @@ def main():
                 run_relay(directory, credentials, args.thread_id, args.socket, args.card_dir, stop)
         except LinkError as error:
             save_json(directory / "connection.json", {"mode": "current_session", "thread_id": args.thread_id,
-                      "status": "error", "message": str(error)})
+                      "status": "expired" if error.expired else "error", "message": str(error)})
             raise
         finally:
             stop.set()

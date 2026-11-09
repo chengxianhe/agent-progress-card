@@ -77,7 +77,7 @@ class Client:
 
     def post(self, endpoint, payload):
         return self.transport(self.base, endpoint, {
-            **payload, "base_info": {"channel_version": VERSION, "bot_agent": "MinAgent/0.1"}},
+            **payload, "base_info": {"channel_version": VERSION, "bot_agent": "AgentProgressCard/0.1"}},
             token=self.token)
 
     def updates(self, cursor):

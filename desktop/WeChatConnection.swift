@@ -6,6 +6,7 @@ struct WeChatConnectionState: Decodable {
     let status: String
     let message: String
     let mode: String?
+    let thread_id: String?
     let qr: String?
     let unsent: Int?
 
@@ -16,7 +17,7 @@ struct WeChatConnectionState: Decodable {
         guard data.count <= 262_144 else { throw CocoaError(.fileReadCorruptFile) }
         let state = try JSONDecoder().decode(Self.self, from: data)
         guard state.message.count <= 4_000, (state.qr?.count ?? 0) <= 8_192,
-              ["loading", "wait", "scaned", "need_verifycode", "connected", "retrying", "error", "stopped"].contains(state.status)
+              ["loading", "wait", "scaned", "need_verifycode", "connected", "retrying", "error", "expired", "stopped"].contains(state.status)
         else { throw CocoaError(.fileReadCorruptFile) }
         return state
     }
@@ -36,6 +37,7 @@ final class WeChatConnectionModel: ObservableObject {
     var label: String {
         if connected { return "微信已连接" }
         if !issue.isEmpty { return "微信连接待检查" }
+        if state?.status == "expired" { return "微信登录已失效" }
         if state?.status == "stopped" { return "微信同步已停止" }
         return "微信连接"
     }
@@ -85,13 +87,54 @@ final class WeChatConnectionModel: ObservableObject {
 
     func stop() { write("stop-request", data: Data()) }
 
-    private func write(_ filename: String, data: Data) {
-        guard let directory else { return }
+    var canReconnect: Bool {
+        guard state?.mode == "current_session", let thread = state?.thread_id,
+              UUID(uuidString: thread) != nil else { return false }
+        return !["loading", "wait", "scaned", "need_verifycode"].contains(state?.status ?? "")
+    }
+
+    func reconnect() {
+        guard canReconnect, let directory, let thread = state?.thread_id else { return }
+        do {
+            let cardDirectory = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/AgentProgressCard")
+            let data = try Data(contentsOf: cardDirectory.appendingPathComponent("activity-source.json"))
+            guard data.count <= 16_384,
+                  let source = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  source["thread_id"] as? String == thread else {
+                issue = "小看板已切换会话，请先切回原会话。"
+                return
+            }
+            guard let resources = Bundle.main.resourceURL else { throw CocoaError(.fileNoSuchFile) }
+            guard write("reconnect-request", data: Data()), write("stop-request", data: Data()) else { return }
+            let worker = Process()
+            worker.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            worker.arguments = ["-m", "agent_progress_wechat.relay", "--state-dir", directory.path,
+                                "--thread-id", thread, "--card-dir", cardDirectory.path, "--reconnect"]
+            var environment = ProcessInfo.processInfo.environment
+            environment["PYTHONPATH"] = resources.path
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            environment["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
+            worker.environment = environment
+            worker.standardOutput = FileHandle.nullDevice
+            worker.standardError = FileHandle.nullDevice
+            try worker.run()
+            issue = "正在停止旧连接并获取新二维码…"
+        } catch { issue = "无法启动重新扫码，请检查本机权限。" }
+    }
+
+    @discardableResult
+    private func write(_ filename: String, data: Data) -> Bool {
+        guard let directory else { return false }
         do {
             let file = directory.appendingPathComponent(filename)
             try data.write(to: file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        } catch { issue = "无法更新微信连接，请检查本机权限。" }
+            return true
+        } catch {
+            issue = "无法更新微信连接，请检查本机权限。"
+            return false
+        }
     }
 }
 
@@ -129,6 +172,9 @@ struct WeChatConnectionView: View {
                 }
                 if let pending = model.state?.unsent, pending > 0 {
                     Text("还有 \(pending) 条回复等待送达").font(.caption).foregroundStyle(.orange)
+                }
+                if model.canReconnect {
+                    Button("重新扫码连接") { model.reconnect() }.buttonStyle(.borderedProminent)
                 }
                 Text("关闭小看板不会停止微信同步。停止同步不会中断正在执行的任务。")
                     .font(.caption).foregroundStyle(.secondary)

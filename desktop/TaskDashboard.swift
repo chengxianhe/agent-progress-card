@@ -9,6 +9,8 @@ struct TaskDashboard: View {
     @State private var section = "概览"
     @State private var category = "全部"
     @State private var failuresOnly = false
+    @State private var submittedChoiceID: String?
+    @State private var choiceIssue = ""
 
     private var task: HistoryTask? {
         let id = expanded ? (selection ?? model.state?.task_id) : model.state?.task_id
@@ -43,8 +45,34 @@ struct TaskDashboard: View {
                 }
                 if !history.issue.isEmpty { notice(history.issue) }
                 if isCurrent && !activity.issue.isEmpty { notice(activity.issue) }
+                if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
+                   let rate = activity.feed?.output_rate {
+                    Text(String(format: "本轮平均输出 %.1f token/秒", rate))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
+                           let choice = activity.feed?.choice, choice.isValid {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("需要你选择：" + choice.question).font(.callout.weight(.semibold))
+                                ForEach(Array(choice.options.enumerated()), id: \.offset) { index, option in
+                                    Button("\(index + 1). \(option)") {
+                                        do {
+                                            try choice.submit(index + 1)
+                                            submittedChoiceID = choice.id
+                                            choiceIssue = "已提交，等待当前会话接收"
+                                        } catch { choiceIssue = "提交失败，请检查本机卡片权限" }
+                                    }
+                                    .disabled((submittedChoiceID == choice.id && activity.feed?.choice_result?.status != "retry") ||
+                                              (activity.feed?.choice_result?.choice_id == choice.id && activity.feed?.choice_result?.status != "retry"))
+                                }
+                                Text(activity.feed?.choice_result?.choice_id == choice.id
+                                     ? activity.feed?.choice_result?.message ?? choiceIssue
+                                     : choiceIssue.isEmpty ? "点击选项，或在微信回复编号。" : choiceIssue)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                         if activity.issue.isEmpty,
                            let reply = currentConversationReply(activity.feed, threadID: task.thread_id, isCurrent: isCurrent) {
                             ConversationReplyView(reply: reply)

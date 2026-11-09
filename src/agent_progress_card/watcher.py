@@ -11,6 +11,7 @@ from pathlib import Path
 from .activity import ActivityReader
 from .store import ProgressStore, default_directory
 from .history import update_history
+from .choice import read_choice
 
 MAX_LINE = 2 * 1024 * 1024
 
@@ -99,6 +100,14 @@ def main():
                     if tail.offset == previous:
                         break
             snapshot = tail.reader.snapshot(time.time())
+            snapshot["choice"] = read_choice(args.state_dir, snapshot["thread_id"])
+            try:
+                with (args.state_dir / "choice-result.json").open("rb") as stream:
+                    raw = stream.read(1025)
+                result = json.loads(raw) if len(raw) <= 1024 else None
+                snapshot["choice_result"] = result if isinstance(result, dict) and snapshot["choice"] and result.get("choice_id") == snapshot["choice"]["id"] else None
+            except (OSError, ValueError, TypeError):
+                snapshot["choice_result"] = None
         except (OSError, ValueError, KeyError, TypeError):
             reader = tail.reader if tail else ActivityReader("", 0)
             snapshot = reader.snapshot(time.time(), "无法读取已绑定会话；显示的是最后记录。")

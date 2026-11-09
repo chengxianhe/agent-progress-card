@@ -60,6 +60,25 @@ PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
 新任务默认不覆盖活动任务，`begin --replace` 只切换显示，不取消助手正在执行的工作。
 也可在虚拟环境中 `python3 -m pip install .`，使用 `agent-progress-card` 命令。
 
+需要你在几个方案中选择时，助手先发布编号选项：
+
+```bash
+PYTHONPATH=src python3 -m agent_progress_card choice \
+  --question '先做哪项？' --option '修复卡片' --option '完善微信'
+# 微信回复 1 或 2；收到选择后清除旧问题。
+PYTHONPATH=src python3 -m agent_progress_card clear-choice
+```
+
+卡片显示问题与选项；已连接的微信会收到一次相同通知。微信回复编号会转换为完整选项文本，
+也可以直接点击卡片上的选项，卡片会通过本机 Codex 会话发送，显示“已送入当前会话”或明确的投递状态；不需要微信转发进程。
+普通文字仍原样转入会话。这里处理的是工作方案选择，工具权限审批仍须在原客户端操作。
+旧选项在 24 小时后自动过期，切换绑定会话后也不会显示。
+微信接口的回信上下文会过期；长期未在微信发消息时，通知会保留排队。
+此时先在微信发“进度”，转发器获得新上下文后会优先发送待处理的选项通知。
+
+卡片显示的是**本轮平均输出 token/秒**，按记录中的输出用量与本轮经过时间计算；
+包含工具等待时间，只有收到用量事件后才显示，不能代表模型瞬时生成速度或费用。
+
 ## 显示真实工具调用
 
 绑定你明确指定的本机 Codex 会话记录与会话 UUID：

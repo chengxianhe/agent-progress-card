@@ -5,6 +5,7 @@ import time
 
 from agent_progress_card.sanitize import clean_text
 from .files import read_json
+from agent_progress_card.choice import read_choice
 
 
 def check_binding(directory, thread_id):
@@ -22,7 +23,14 @@ def snapshot(directory, thread_id):
     state = read_json(directory / "state.json")
     if state.get("source") == "wechat":
         raise ValueError("小看板仍显示旧版独立任务，请切回当前会话")
+    feed["choice"] = read_choice(directory, thread_id)
     return state, feed
+
+
+def choice_text(choice):
+    return clean_text("需要你选择：" + choice["question"] + "\n"
+            + "\n".join(f"{index}. {option}" for index, option in enumerate(choice["options"], 1))
+            + "\n回复数字 1-" + str(len(choice["options"])) + "，或直接发文字说明。", 1800)
 
 
 def overview(state, feed):
@@ -41,6 +49,8 @@ def command_reply(text, state, feed):
                 "进度：查看小看板当前进度\n结果：查看最近公开回复\n"
                 "权限审批仍在原客户端处理；不会自动同意审批。")
     if text in ("进度", "/status"):
+        if feed.get("choice"):
+            return choice_text(feed["choice"])
         return overview(state, feed)
     if text in ("结果", "/result"):
         notes = [x for x in feed.get("notes", []) if x.get("kind") == "final"]
@@ -54,6 +64,12 @@ def mirror(store, state, feed):
     since = float(store.get("since"))
     now = time.time()
     with store.lock, store.db:
+        choice = feed.get("choice")
+        if choice:
+            store.enqueue("choice:" + choice["id"], choice_text(choice))
+        else:
+            # A cleared question must not arrive after the user has already answered it on the card.
+            store.db.execute("DELETE FROM outbox WHERE id LIKE 'choice:%' AND delivered=0")
         live_notes = [n for n in feed.get("notes", []) if not n.get("replayed") and n.get("time", 0) >= since]
         commentary = [n for n in live_notes if n.get("kind") == "commentary"]
         finals = [n for n in live_notes if n.get("kind") == "final"]

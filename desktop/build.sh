@@ -9,6 +9,7 @@ xcrun swiftc -parse-as-library -O -module-cache-path "$CARD_ROOT/build/swift-cac
   -vfsoverlay "$CARD_OVERLAY" \
   "$CARD_ROOT/desktop/TaskIdentity.swift" "$CARD_ROOT/desktop/ProgressState.swift" "$CARD_ROOT/desktop/CardWindow.swift" \
   "$CARD_ROOT/desktop/ActivityFeed.swift" "$CARD_ROOT/desktop/ActivityModel.swift" \
+  "$CARD_ROOT/desktop/CardChoice.swift" \
   "$CARD_ROOT/desktop/ConversationReply.swift" "$CARD_ROOT/desktop/ConversationReplyView.swift" \
   "$CARD_ROOT/desktop/ToolActivityView.swift" \
   "$CARD_ROOT/desktop/WorkExplanationView.swift" \
@@ -16,8 +17,9 @@ xcrun swiftc -parse-as-library -O -module-cache-path "$CARD_ROOT/build/swift-cac
   "$CARD_ROOT/desktop/WeChatConnection.swift" \
   "$CARD_ROOT/desktop/AgentProgressCard.swift" \
   -o "$CARD_APP/Contents/MacOS/AgentProgressCard"
-mkdir -p "$CARD_APP/Contents/Resources/agent_progress_card"
+mkdir -p "$CARD_APP/Contents/Resources/agent_progress_card" "$CARD_APP/Contents/Resources/agent_progress_wechat"
 cp "$CARD_ROOT"/src/agent_progress_card/*.py "$CARD_APP/Contents/Resources/agent_progress_card/"
+cp "$CARD_ROOT"/src/agent_progress_wechat/*.py "$CARD_APP/Contents/Resources/agent_progress_wechat/"
 cat > "$CARD_APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

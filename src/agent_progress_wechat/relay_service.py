@@ -12,6 +12,15 @@ from .relay_mirror import check_binding, command_reply, mirror, snapshot
 from .relay_store import RelayStore
 
 
+def selected_message(text, choice):
+    if not choice or not text.isdigit() or len(text) > 2:
+        return text
+    index = int(text)
+    if 1 <= index <= len(choice["options"]):
+        return "我选择第 " + text + " 项：" + choice["options"][index - 1]
+    return text
+
+
 def seed_previous_connection(store, directory, owner):
     """Reuse only this owner's last reply context/cursor; never replay old tasks."""
     path = directory / "bridge.sqlite3"
@@ -41,9 +50,13 @@ def deliver(store, session, message, directory):
         state, feed = snapshot(directory, session.thread_id)
         store.mark(message["id"], "local", reply=command_reply(message["text"], state, feed))
         return
+    text = message["text"]
+    if text.isdigit():
+        _, feed = snapshot(directory, session.thread_id)
+        text = selected_message(text, feed.get("choice"))
     connection = session.open()
     try:
-        method, params = session.prepare(connection, message["text"], message["id"])
+        method, params = session.prepare(connection, text, message["id"])
         store.mark(message["id"], "sending")
         try:
             result = connection.call(method, params)
@@ -66,6 +79,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
     session = CurrentSession(socket_path, thread_id)
     client = Client(credentials)
     health, health_lock = {}, threading.RLock()
+    auth_expired = threading.Event()
 
     def health_update(component, problem=""):
         with health_lock:
@@ -74,6 +88,8 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
     def publish():
         with health_lock:
             problems = [p for p in health.values() if p]
+        if store.summary()["unsent"] and time.time() - float(store.get("context_at", "0")) >= 90:
+            problems.append("微信回信上下文已过期；请先在微信发送“进度”刷新连接")
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
                   "status": "retrying" if problems else "connected", "message": "；".join(problems) if problems else
                   "已连接当前会话。微信文字会送入这段聊天，小看板进度会回传。", **store.summary()})
@@ -90,6 +106,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             except LinkError as error:
                 health_update("wechat", str(error))
                 if error.expired:
+                    auth_expired.set()
                     stop.set()
                 else:
                     stop.wait(5)
@@ -109,6 +126,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                 store.sent(item["id"], False)
                 health_update("send", str(error) + "，回复保留待发送")
                 if error.expired:
+                    auth_expired.set()
                     stop.set()
 
     def guarded(target):
@@ -164,6 +182,8 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
         with health_lock:
             problems = [p for p in health.values() if p]
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
-            "status": "stopped", "message": "转发已停止；" + ("；".join(problems) if problems else "当前 Codex 任务不受影响"),
+            "status": "expired" if auth_expired.is_set() else "stopped",
+            "message": ("微信登录已失效，请在小看板重新扫码；" if auth_expired.is_set() else "转发已停止；")
+            + ("；".join(problems) if problems else "当前 Codex 任务不受影响"),
             **store.summary()})
         store.db.close()
