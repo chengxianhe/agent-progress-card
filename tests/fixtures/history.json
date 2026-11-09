@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "task_id": "00000000-0000-4000-8000-000000000001",
+      "title": "合成任务",
+      "status": "succeeded",
+      "action": "完成",
+      "detail": "",
+      "started_at": 90.0,
+      "updated_at": 103.0,
+      "legacy": false,
+      "thread_id": "fixture-thread",
+      "calls": [],
+      "steps": [
+        {
+          "id": "note",
+          "time": 101.0,
+          "text": "正在检查",
+          "kind": "commentary"
+        }
+      ]
+    },
+    {
+      "task_id": "00000000-0000-4000-8000-000000000002",
+      "title": "合成任务",
+      "status": "succeeded",
+      "action": "完成",
+      "detail": "",
+      "started_at": 90.0,
+      "updated_at": 103.0,
+      "legacy": false,
+      "thread_id": "fixture-thread",
+      "calls": [
+        {
+          "id": "command",
+          "name": "测试工具",
+          "status": "failed",
+          "time": 100.0,
+          "duration": 0.25,
+          "parameters": "示例参数",
+          "category": "command",
+          "result": "合成结果"
+        },
+        {
+          "id": "web",
+          "name": "测试工具",
+          "status": "completed",
+          "time": 101.0,
+          "duration": 0.25,
+          "parameters": "示例参数",
+          "category": "web",
+          "result": "合成结果"
+        },
+        {
+          "id": "file",
+          "name": "测试工具",
+          "status": "completed",
+          "time": 102.0,
+          "duration": 0.25,
+          "parameters": "示例参数",
+          "category": "file",
+          "result": "合成结果"
+        }
+      ],
+      "steps": [
+        {
+          "id": "note",
+          "time": 101.0,
+          "text": "正在检查",
+          "kind": "commentary"
+        }
+      ]
+    }
+  ]
+}

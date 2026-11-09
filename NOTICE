@@ -1,0 +1,19 @@
+Agent Progress Card
+
+Maintainer: chengxianhe
+
+This standalone distribution extracts the desktop-card and WeChat extensions
+previously developed in a min-agent checkout. Its source snapshot originated
+from extension commit af1f73e5ac97083f45346d1deeccc814abd43bcb.
+The original demo engine, web UI, model adapters and MCP demo are not included.
+This repository starts its own Git history and has no upstream runtime dependency.
+
+The earlier project was distributed under the MIT License:
+Copyright (c) 2026 Jinwei
+Original project: https://github.com/JinweiX/min-agent
+The original copyright and permission notice are preserved in LICENSE.
+This acknowledgement does not imply affiliation or endorsement.
+
+WeChat connectivity is an independent Python implementation of the publicly
+documented Tencent iLink protocol. No Tencent plugin source is bundled.
+Protocol availability and local Codex interfaces may change independently.

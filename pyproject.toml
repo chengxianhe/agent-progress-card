@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-progress-card"
+version = "0.1.0"
+description = "A native macOS progress card with explicit session tracking and an optional WeChat relay."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+license = { file = "LICENSE" }
+authors = [{ name = "chengxianhe" }]
+
+[project.urls]
+Homepage = "https://github.com/chengxianhe/agent-progress-card"
+Repository = "https://github.com/chengxianhe/agent-progress-card"
+Issues = "https://github.com/chengxianhe/agent-progress-card/issues"
+
+[project.scripts]
+agent-progress-card = "agent_progress_card.__main__:main"
+agent-progress-attach = "agent_progress_card.attach:main"
+agent-progress-wechat = "agent_progress_wechat.relay:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agent_progress_card*", "agent_progress_wechat*"]

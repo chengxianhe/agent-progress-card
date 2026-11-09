@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "thread_id": "fixture-thread",
+  "checked_at": 103.0,
+  "last_event_at": 102.0,
+  "error": "",
+  "turn_active": false,
+  "commentary": "正在检查",
+  "pending": [],
+  "calls": [
+    {
+      "id": "command",
+      "name": "测试工具",
+      "status": "failed",
+      "time": 100.0,
+      "duration": 0.25,
+      "parameters": "示例参数",
+      "category": "command",
+      "result": "合成结果"
+    },
+    {
+      "id": "web",
+      "name": "测试工具",
+      "status": "completed",
+      "time": 101.0,
+      "duration": 0.25,
+      "parameters": "示例参数",
+      "category": "web",
+      "result": "合成结果"
+    },
+    {
+      "id": "file",
+      "name": "测试工具",
+      "status": "completed",
+      "time": 102.0,
+      "duration": 0.25,
+      "parameters": "示例参数",
+      "category": "file",
+      "result": "合成结果"
+    }
+  ]
+}
