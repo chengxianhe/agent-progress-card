@@ -1,6 +1,6 @@
 import Foundation
 
-struct CardChoice: Decodable {
+struct CardChoice: Decodable, Identifiable {
     let id: String
     let thread_id: String
     let created_at: Double
@@ -38,7 +38,14 @@ struct CardChoice: Decodable {
 
 struct CardChoiceResult: Decodable {
     let choice_id: String
+    let thread_id: String?
     let status: String
+    let index: Int?
+    let created_at: Double?
     let message: String
-    var isValid: Bool { ["sent", "uncertain", "retry"].contains(status) && message.count <= 180 }
+    var isValid: Bool {
+        !choice_id.isEmpty && choice_id.count <= 64 && ["sent", "uncertain", "retry"].contains(status) &&
+        message.count <= 180 && (index == nil || (1...5).contains(index!)) &&
+        (created_at == nil || (created_at!.isFinite && created_at! > 0))
+    }
 }

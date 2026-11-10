@@ -105,7 +105,11 @@ def main():
                 with (args.state_dir / "choice-result.json").open("rb") as stream:
                     raw = stream.read(1025)
                 result = json.loads(raw) if len(raw) <= 1024 else None
-                snapshot["choice_result"] = result if isinstance(result, dict) and snapshot["choice"] and result.get("choice_id") == snapshot["choice"]["id"] else None
+                recent = (isinstance(result, dict) and result.get("thread_id") == snapshot["thread_id"]
+                          and isinstance(result.get("created_at"), (int, float))
+                          and 0 <= time.time() - result["created_at"] <= 300)
+                current = isinstance(result, dict) and snapshot["choice"] and result.get("choice_id") == snapshot["choice"]["id"]
+                snapshot["choice_result"] = result if recent or current else None
             except (OSError, ValueError, TypeError):
                 snapshot["choice_result"] = None
         except (OSError, ValueError, KeyError, TypeError):

@@ -15,9 +15,10 @@ VERSION = "2.4.10"
 
 
 class LinkError(Exception):
-    def __init__(self, message, expired=False):
+    def __init__(self, message, expired=False, stale_context=False):
         super().__init__(message)
         self.expired = expired
+        self.stale_context = stale_context
 
 
 def trusted_base(value):
@@ -62,7 +63,8 @@ def request(base, endpoint, body=None, token="", timeout=35):
         code = value.get("errcode") or value.get("ret")
         # Server text may contain credentials. Only expose numeric codes.
         safe_code = str(code) if isinstance(code, int) else "未知"
-        raise LinkError("微信接口错误：" + safe_code, code == -14)
+        raise LinkError("微信接口错误：" + safe_code, code == -14,
+                        code == -2 and endpoint == "sendmessage")
     return value
 
 

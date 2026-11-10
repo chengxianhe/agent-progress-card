@@ -1,4 +1,5 @@
 import json
+import io
 import os
 from pathlib import Path
 import stat
@@ -14,7 +15,7 @@ from agent_progress_wechat.card import Card, recover_card
 from agent_progress_wechat.database import Database
 from agent_progress_wechat.executor import command, execute, public_event
 from agent_progress_wechat.files import read_json, save_json
-from agent_progress_wechat.ilink import BASE_URL, Client, LinkError, trusted_base
+from agent_progress_wechat.ilink import BASE_URL, Client, LinkError, request, trusted_base
 from agent_progress_wechat.login import login
 
 
@@ -107,6 +108,14 @@ class StoreTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_send_ret_minus_two_waits_for_fresh_inbound_context(self):
+        with patch("agent_progress_wechat.ilink.urllib.request.build_opener") as opener:
+            opener.return_value.open.return_value = io.BytesIO(b'{"ret":-2}')
+            with self.assertRaises(LinkError) as failure:
+                request(BASE_URL, "sendmessage", {"msg": {}}, token="fake-token")
+        self.assertTrue(failure.exception.stale_context)
+        self.assertFalse(failure.exception.expired)
+
     def test_token_stays_on_trusted_https_origin(self):
         for url in ("http://ilinkai.weixin.qq.com", "https://weixin.qq.com.evil.test",
                     "https://evil.test", "https://user:pass@ilinkai.weixin.qq.com",

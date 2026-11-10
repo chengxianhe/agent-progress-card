@@ -41,7 +41,9 @@ struct ActivityFeed: Decodable {
         guard feed.version == 1, feed.calls.count <= 20, feed.pending.count <= 16,
               feed.output_rate.map({ $0.isFinite && $0 >= 0 && $0 < 100_000 }) != false,
               feed.choice?.isValid != false,
+              feed.choice.map({ $0.thread_id == feed.thread_id }) != false,
               feed.choice_result?.isValid != false,
+              feed.choice_result?.thread_id.map({ $0 == feed.thread_id }) != false,
               feed.commentary.count <= 900, feed.latest_reply?.isValid != false,
               Set(feed.calls.map(\.id)).count == feed.calls.count,
               feed.calls.allSatisfy({ $0.name.count <= 150 && $0.parameters.count <= 1000 && $0.result.count <= 1900 })

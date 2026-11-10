@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .store import ProgressStore
-from .choice import create_choice
+from .choice import clear_choice, create_choice
 
 
 def main() -> int:
@@ -36,7 +36,7 @@ def main() -> int:
         elif args.command == "choice":
             state = create_choice(store.directory, args.question, args.option)
         elif args.command == "clear-choice":
-            (store.directory / "choice.json").unlink(missing_ok=True)
+            clear_choice(store.directory)
             state = {"cleared": True}
         else:
             state = store.read()

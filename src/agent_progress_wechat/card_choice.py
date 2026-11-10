@@ -1,10 +1,10 @@
 """Send one explicit card selection to the already bound conversation."""
 import argparse
-import fcntl
 import json
 from pathlib import Path
+import time
 
-from agent_progress_card.choice import read_choice
+from agent_progress_card.choice import choice_lock, complete_choice_unlocked, read_choice
 from agent_progress_card.watcher import atomic_json
 
 from .local_socket import RpcError, TransportError
@@ -45,7 +45,11 @@ def process_card_choice(card_directory, session):
             status, message = "sent", "已送入当前会话"
         except (RpcError, TransportError, OSError):
             status, message = "uncertain", "投递结果不确定；请在原会话核对，暂不自动重发"
-        atomic_json(result_path, {"choice_id": choice["id"], "status": status, "message": message})
+        if status == "sent":
+            complete_choice_unlocked(card_directory, session.thread_id, choice["id"], index, "card")
+        else:
+            atomic_json(result_path, {"choice_id": choice["id"], "thread_id": session.thread_id,
+                                      "status": status, "message": message, "created_at": time.time()})
     finally:
         connection.close()
 
@@ -58,8 +62,7 @@ def main():
     parser.add_argument("--state-dir", type=Path, default=default_directory())
     args = parser.parse_args()
     directory = args.state_dir
-    with (directory / "choice-send.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with choice_lock(directory):
         binding = {}
         try:
             binding = json.loads((directory / "activity-source.json").read_text())
@@ -70,7 +73,8 @@ def main():
                 choice = read_choice(directory, binding["thread_id"])
                 if choice:
                     atomic_json(directory / "choice-result.json", {"choice_id": choice["id"],
-                                "status": "retry", "message": "当前会话暂不可用；稍后可重试"})
+                                "thread_id": binding["thread_id"], "status": "retry",
+                                "created_at": time.time(), "message": "当前会话暂不可用；稍后可重试"})
             except (OSError, ValueError, KeyError):
                 pass
 

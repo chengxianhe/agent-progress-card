@@ -4,11 +4,13 @@ import sqlite3
 import threading
 import time
 
+from agent_progress_card.choice import (choice_lock, complete_choice_unlocked, read_choice, read_choice_result,
+                                        recent_choice_result, record_uncertain_choice_unlocked)
 from .current_session import CurrentSession, SessionUnavailable
 from .files import save_json
 from .ilink import Client, LinkError
 from .local_socket import RpcError, TransportError
-from .relay_mirror import check_binding, command_reply, mirror, snapshot
+from .relay_mirror import check_binding, choice_text, command_reply, mirror, snapshot
 from .relay_store import RelayStore
 
 
@@ -46,14 +48,40 @@ def seed_previous_connection(store, directory, owner):
 def deliver(store, session, message, directory):
     """Only mark sending immediately before the mutating RPC; uncertainty is terminal."""
     check_binding(directory, session.thread_id)
+    if message["text"] in ("选项", "/choice"):
+        with choice_lock(directory):
+            choice = read_choice(directory, session.thread_id)
+            result = read_choice_result(directory, session.thread_id)
+            blocked = choice and result and result["choice_id"] == choice["id"] and result["status"] == "uncertain"
+            if choice:
+                with store.lock, store.db:
+                    store.db.execute("DELETE FROM outbox WHERE id=? AND delivered=0", ("choice:" + choice["id"],))
+            reply = "上次选择的投递结果不确定，请先在桌面核对。" if blocked else (
+                choice_text(choice) if choice else "当前没有待选问题。")
+            store.mark(message["id"], "local", reply=reply)
+        return
     if message["text"] in ("帮助", "/help", "进度", "/status", "结果", "/result"):
         state, feed = snapshot(directory, session.thread_id)
         store.mark(message["id"], "local", reply=command_reply(message["text"], state, feed))
         return
-    text = message["text"]
-    if text.isdigit():
-        _, feed = snapshot(directory, session.thread_id)
-        text = selected_message(text, feed.get("choice"))
+    if message["text"].isdigit() and len(message["text"]) <= 2:
+        with choice_lock(directory):
+            choice = read_choice(directory, session.thread_id)
+            index = int(message["text"])
+            result = read_choice_result(directory, session.thread_id)
+            if choice and result and result["choice_id"] == choice["id"] and result["status"] == "uncertain":
+                store.mark(message["id"], "local", reply="上次选择的投递结果不确定，请先在桌面核对。")
+                return
+            if not choice and recent_choice_result(directory, session.thread_id, index):
+                store.mark(message["id"], "local", reply="这项选择已经收到，无需重复发送。")
+                return
+            return deliver_text(store, session, message, directory, choice)
+    return deliver_text(store, session, message, directory)
+
+
+def deliver_text(store, session, message, directory, choice=None):
+    text = selected_message(message["text"], choice)
+    chosen_index = int(message["text"]) if choice and text != message["text"] else None
     connection = session.open()
     try:
         method, params = session.prepare(connection, text, message["id"])
@@ -66,9 +94,15 @@ def deliver(store, session, message, directory):
         except RpcError:
             store.mark(message["id"], "rejected", reply="当前会话拒绝了这次投递；没有转发成功，请稍后重发。")
         except Exception:
+            if chosen_index is not None:
+                record_uncertain_choice_unlocked(directory, session.thread_id, choice["id"], chosen_index)
             store.mark(message["id"], "uncertain", reply="消息投递回执丢失，可能已进入当前会话。为避免重复执行，不会自动重发，请先在桌面核对。")
         else:
-            store.mark(message["id"], "delivered", turn, "已送入当前会话。" if method == "turn/start" else "已补充到当前正在执行的任务。")
+            if chosen_index is not None:
+                complete_choice_unlocked(directory, session.thread_id, choice["id"], chosen_index, "wechat")
+            receipt = ("已收到第 " + str(chosen_index) + " 项，送入当前会话。") if chosen_index is not None else (
+                "已送入当前会话。" if method == "turn/start" else "已补充到当前正在执行的任务。")
+            store.mark(message["id"], "delivered", turn, receipt)
     finally:
         connection.close()
 
@@ -123,8 +157,12 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                 store.sent(item["id"], True)
                 health_update("send")
             except LinkError as error:
-                store.sent(item["id"], False)
-                health_update("send", str(error) + "，回复保留待发送")
+                if error.stale_context:
+                    store.put("context_at", "0")
+                    health_update("send", "微信回信上下文已过期；通知保留，请从微信发送“选项”或“进度”")
+                else:
+                    store.sent(item["id"], False)
+                    health_update("send", str(error) + "，回复保留待发送")
                 if error.expired:
                     auth_expired.set()
                     stop.set()

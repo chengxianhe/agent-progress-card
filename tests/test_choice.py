@@ -69,13 +69,18 @@ class ChoiceTests(unittest.TestCase):
             process_card_choice(root, session)
             self.assertEqual(len(session.connection.calls), 2)
             self.assertEqual(session.connection.calls[0], ("prepare", ("我选择第 2 项：乙", choice["id"], "card")))
-            self.assertEqual(json.loads((root / "choice-result.json").read_text())["status"], "sent")
+            result = json.loads((root / "choice-result.json").read_text())
+            self.assertEqual(result["status"], "sent")
+            self.assertEqual(result["index"], 2)
+            self.assertIsNone(read_choice(root, "thread"))
 
     def test_bound_choice_is_deduplicated_and_numbered(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             atomic_json(root / "activity-source.json", {"thread_id": "thread"})
             choice = create_choice(root, "用哪个方案？", ["先上线", "再测试"])
+            with self.assertRaises(ValueError):
+                create_choice(root, "另一个问题？", ["甲", "乙"])
             self.assertIsNone(read_choice(root, "other"))
             self.assertEqual(read_choice(root, "thread"), choice)
             self.assertIn("2. 再测试", choice_text(choice))

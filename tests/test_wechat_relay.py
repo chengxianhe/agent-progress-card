@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from agent_progress_card.choice import create_choice, read_choice
 from agent_progress_wechat.current_session import CurrentSession, SessionUnavailable
 from agent_progress_wechat.card_binding import register_connection
 from agent_progress_wechat.files import save_json
@@ -199,6 +200,58 @@ class RelayTests(unittest.TestCase):
         binding = json.loads((card / "wechat-source.json").read_text())
         self.assertEqual(binding, {"version": 1, "directory": str(self.root.resolve())})
         self.assertEqual((card / "wechat-source.json").stat().st_mode & 0o777, 0o600)
+
+    def test_choice_command_returns_current_question_without_live_activity_feed(self):
+        choice = create_choice(self.root, "先做什么？", ["甲", "乙"])
+        self.store.enqueue("old:notice", "旧通知")
+        self.store.db.commit()
+        self.store.ingest({"msgs": [{"message_id": "choice-request", "from_user_id": "owner",
+                                   "message_type": 1, "create_time_ms": time.time() * 1000,
+                                   "context_token": "fresh", "item_list": [{"type": 1,
+                                   "text_item": {"text": "选项"}}]}]})
+        deliver(self.store, CurrentSession("unused", "thread-1"), self.store.next_message(), self.root)
+        self.assertEqual(self.store.summary()["tasks"], {"local": 1})
+        self.assertEqual(self.store.outgoing()["id"], "local:choice-request")
+        self.assertIn("2. 乙", self.store.outgoing()["text"])
+        self.assertEqual(read_choice(self.root, "thread-1")["id"], choice["id"])
+
+    def test_wechat_number_resolves_choice_once_and_clears_card_prompt(self):
+        choice = create_choice(self.root, "先做什么？", ["甲", "乙"])
+        connection = FakeConnection("idle")
+        session = CurrentSession("unused", "thread-1", lambda _: connection)
+        self.ingest("answer-1", "2")
+        deliver(self.store, session, self.store.next_message(), self.root)
+        self.assertIsNone(read_choice(self.root, "thread-1"))
+        result = json.loads((self.root / "choice-result.json").read_text())
+        self.assertEqual((result["choice_id"], result["index"], result["status"]), (choice["id"], 2, "sent"))
+        self.assertIn("我选择第 2 项：乙", connection.calls[-1][1]["input"][0]["text"])
+        self.ingest("answer-2", "2")
+        deliver(self.store, session, self.store.next_message(), self.root)
+        self.assertEqual([method for method, _ in connection.calls].count("turn/start"), 1)
+        self.assertEqual(self.store.summary()["tasks"], {"delivered": 1, "local": 1})
+        self.assertIn("已经收到", self.store.db.execute(
+            "SELECT text FROM outbox WHERE id='local:answer-2'").fetchone()[0])
+
+    def test_uncertain_choice_is_blocked_across_wechat_and_card(self):
+        choice = create_choice(self.root, "先做什么？", ["甲", "乙"])
+        connection = FakeConnection("idle", fail=TimeoutError())
+        session = CurrentSession("unused", "thread-1", lambda _: connection)
+        self.ingest("answer-1", "1")
+        deliver(self.store, session, self.store.next_message(), self.root)
+        self.assertEqual(read_choice(self.root, "thread-1")["id"], choice["id"])
+        result = json.loads((self.root / "choice-result.json").read_text())
+        self.assertEqual(result["status"], "uncertain")
+        calls = len(connection.calls)
+        self.ingest("answer-2", "1")
+        deliver(self.store, session, self.store.next_message(), self.root)
+        self.assertEqual(len(connection.calls), calls)
+        self.assertIn("不确定", self.store.db.execute(
+            "SELECT text FROM outbox WHERE id='local:answer-2'").fetchone()[0])
+        feed = {"thread_id": "thread-1", "notes": [], "pending": [], "choice": choice,
+                "choice_result": result}
+        mirror(self.store, {"task_id": "task", "title": "任务", "status": "waiting", "action": "待选"}, feed)
+        self.assertIsNone(self.store.db.execute("SELECT id FROM outbox WHERE id=?", (
+            "choice:" + choice["id"],)).fetchone())
 
     def test_expired_login_remains_visible_after_service_stops(self):
         class ExpiredClient:

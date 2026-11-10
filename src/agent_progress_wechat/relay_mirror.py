@@ -5,7 +5,7 @@ import time
 
 from agent_progress_card.sanitize import clean_text
 from .files import read_json
-from agent_progress_card.choice import read_choice
+from agent_progress_card.choice import read_choice, read_choice_result
 
 
 def check_binding(directory, thread_id):
@@ -24,6 +24,7 @@ def snapshot(directory, thread_id):
     if state.get("source") == "wechat":
         raise ValueError("小看板仍显示旧版独立任务，请切回当前会话")
     feed["choice"] = read_choice(directory, thread_id)
+    feed["choice_result"] = read_choice_result(directory, thread_id)
     return state, feed
 
 
@@ -46,10 +47,13 @@ def overview(state, feed):
 def command_reply(text, state, feed):
     if text in ("帮助", "/help"):
         return ("已连接你指定的桌面会话。普通文字会作为你的消息送入该会话，保留上下文。\n"
-                "进度：查看小看板当前进度\n结果：查看最近公开回复\n"
+                "选项：获取当前待选问题\n进度：查看小看板当前进度\n结果：查看最近公开回复\n"
                 "权限审批仍在原客户端处理；不会自动同意审批。")
     if text in ("进度", "/status"):
         if feed.get("choice"):
+            if ((feed.get("choice_result") or {}).get("choice_id") == feed["choice"]["id"]
+                    and feed["choice_result"]["status"] == "uncertain"):
+                return "上次选择的投递结果不确定，请先在桌面核对。"
             return choice_text(feed["choice"])
         return overview(state, feed)
     if text in ("结果", "/result"):
@@ -65,7 +69,10 @@ def mirror(store, state, feed):
     now = time.time()
     with store.lock, store.db:
         choice = feed.get("choice")
-        if choice:
+        blocked = (choice and feed.get("choice_result")
+                   and feed["choice_result"].get("choice_id") == choice["id"]
+                   and feed["choice_result"].get("status") == "uncertain")
+        if choice and not blocked:
             store.enqueue("choice:" + choice["id"], choice_text(choice))
         else:
             # A cleared question must not arrive after the user has already answered it on the card.

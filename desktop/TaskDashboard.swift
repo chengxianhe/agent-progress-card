@@ -73,6 +73,12 @@ struct TaskDashboard: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
+                        if isCurrent, activity.issue.isEmpty, activity.feed?.choice == nil,
+                           activity.feed?.choice_result?.thread_id == task.thread_id,
+                           let result = activity.feed?.choice_result, result.status == "sent" {
+                            Label(result.message, systemImage: "checkmark.circle.fill")
+                                .font(.caption).foregroundStyle(.green)
+                        }
                         if activity.issue.isEmpty,
                            let reply = currentConversationReply(activity.feed, threadID: task.thread_id, isCurrent: isCurrent) {
                             ConversationReplyView(reply: reply)

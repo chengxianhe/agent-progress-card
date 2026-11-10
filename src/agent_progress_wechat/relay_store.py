@@ -110,9 +110,10 @@ class RelayStore:
         with self.lock:
             if not self.get("context") or time.time() - float(self.get("context_at", "0")) >= 90:
                 return None
-            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND attempts<5 "
-                                  "ORDER BY CASE WHEN id LIKE 'choice:%' THEN 0 ELSE 1 END, rowid LIMIT 1").fetchone()
-            return dict(row) if row and row["due"] <= time.time() else None
+            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND attempts<5 AND due<=? "
+                                  "ORDER BY CASE WHEN id LIKE 'local:%' THEN 0 WHEN id LIKE 'choice:%' THEN 1 "
+                                  "WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, rowid LIMIT 1", (time.time(),)).fetchone()
+            return dict(row) if row else None
 
     def sent(self, identity, success):
         with self.lock, self.db:

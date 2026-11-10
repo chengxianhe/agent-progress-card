@@ -42,6 +42,8 @@ struct CardView: View {
     @State private var showWeChat = false
     @State private var expanded = false
     @State private var pinned = true
+    @State private var promptedChoiceID: String?
+    @State private var presentedChoice: CardChoice?
     let resize: (Bool) -> Void
     let pin: (Bool) -> Void
 
@@ -100,6 +102,19 @@ struct CardView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(item: $presentedChoice) { ChoicePromptView(choice: $0) }
+        .onReceive(activity.$feed) { feed in
+            guard let choice = feed?.choice, choice.isValid else {
+                presentedChoice = nil
+                return
+            }
+            if feed?.choice_result?.choice_id == choice.id && feed?.choice_result?.status != "retry" {
+                presentedChoice = nil
+            } else if promptedChoiceID != choice.id {
+                promptedChoiceID = choice.id
+                presentedChoice = choice
+            }
+        }
     }
 }
 

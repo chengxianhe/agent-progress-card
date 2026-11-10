@@ -8,6 +8,7 @@ explicitly bound, already-open Codex session and returns public progress.
 
 The card is not an agent engine. It needs no web server or model API key. It does not expose hidden
 reasoning, approve tool permissions or read unrelated conversations.
+An assistant can explicitly publish numbered choices for the card and the owner-only WeChat relay.
 
 ## Build
 
@@ -50,13 +51,25 @@ An assistant can publish a numbered product choice with:
 ```bash
 PYTHONPATH=src python3 -m agent_progress_card choice \
   --question 'Which part first?' --option 'Card UI' --option 'WeChat relay'
+```
+
+Card clicks and WeChat number replies clear the choice after acknowledged delivery. Use the following
+command only when the user answers in chat directly or the question is cancelled:
+
+```bash
 PYTHONPATH=src python3 -m agent_progress_card clear-choice
 ```
 
-The choice appears on the card and is queued for the owner's WeChat. Replying `1` or `2` sends the
-selected text to the bound conversation. This does not approve tool or system permissions.
-You can also click a choice on the card. It sends through the local bound Codex session, reports the result,
-and does not require the WeChat relay process.
+The card opens a choice sheet and keeps the options in its main view. WeChat receives a proactive
+notification only while its reply context is fresh; otherwise, send `选项` to the paired bot to fetch
+the current question, then reply `1` or `2`. The relay sends the selected text as a user message to
+the bound Codex conversation and closes the choice after an acknowledged delivery. This receipt
+means the message was accepted, not that the task finished. The card shows the receipt briefly.
+You can also click a card option, which sends through the local session without the WeChat relay.
+An uncertain delivery is blocked from automatic resubmission. Interactive prompts shown by the Codex
+CLI are not captured automatically, and a WeChat number reply does not answer an existing CLI prompt.
+The assistant publishes ordinary choices explicitly. Tool and system permissions still require
+approval in their original client.
 
 ## Optional WeChat relay
 
@@ -75,7 +88,8 @@ The relay inherits the existing session's permissions and never approves request
 Ordinary text sent to the session incurs normal model usage; polling and local status queries do not.
 Sleep, network loss or stopping the relay interrupts delivery. There is no background startup service.
 After a long idle period, WeChat may require a fresh message from the owner before the bot can send
-queued notifications. Send `进度` to refresh the reply context; the relay prioritizes pending choices.
+queued notifications. Send `选项` or `进度` to the paired bot to refresh the reply context and fetch
+the current choice. Local command replies and pending choices take priority over old notifications.
 Local Codex integration is experimental, historically verified against CLI 0.167.0, not a stable API.
 
 ## Verify
