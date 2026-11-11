@@ -2,27 +2,27 @@
 
 [English](README.en.md)
 
-一个独立的 macOS 桌面小卡片，用来查看 AI 助手当前在做什么：任务状态、公开工作说明、
-工具调用、最近回复和任务历史。可选接入本人微信，把文字指令发到已绑定的 Codex 会话，
-并接收该会话的进度与结果。
+一个原生 macOS 桌面小卡片，展示 AI 助手的任务状态、公开工作说明、工具调用、最近回复和任务历史。
+可选连接本人微信，在手机上向已绑定的 Codex 会话发任务、查进度，并提交单次命令审批。
 
-无需网页服务或模型 API Key；本工具不包含 Agent 执行引擎。任务仍由你已打开的助手会话执行。
+无需网页服务或额外的模型 API Key。本工具不包含 Agent 执行引擎，任务仍由已打开的 Codex 会话执行。
+不展示内部推理，不读取其他会话、个人微信聊天列表或群聊。
 
 ## 功能
 
-- 原生 SwiftUI / AppKit 窗口：拖动、置顶、展开和收起。
-- 当前/历史任务切换；概览、过程、工具、结果分类。
-- 按命令、文件、网页、MCP 筛选工具，查看失败项与有长度限制的参数/结果。
-- 工具调用下方显示公开工作说明，保留当前会话最近一次完成回复。
-- 可显式发布编号选项：小看板弹出选择，微信回复编号后将选项送入已绑定会话。
-- 显式绑定单个 Codex 会话，读取公开事件并脱敏；不会显示内部推理或自动读取其他聊天。
-- 微信扫码、配对码、连接状态与停止同步放在卡片内，仅接受扫码本人。
+- SwiftUI / AppKit 窗口，可拖动、置顶、展开和收起。
+- 当前/历史任务切换；概览、过程、工具、结果分类，以及工具类型/失败项筛选。
+- 工具调用下方展示公开工作说明，保留最近完成回复；参数与结果有脱敏和长度限制。
+- 显示本轮平均输出 token/秒，包含工具等待时间，不代表瞬时生成速度或费用。
+- 普通看板选项支持卡片点选、微信编号回复；原生提问另外显示只读通知。
+- 本人微信扫码与连接管理；消息排队、退避重试及发送异常提示。
+- 显式开启后，在微信按原生顺序选择单次命令审批；长期放行仍需电脑操作。
+- 可选用户级后台常驻：登录后启动、异常退出后恢复，尊重手动停止。
 
-当前为源码发布，macOS 13+；需要 Xcode Command Line Tools、Python 3.10+。
-原生采集进程使用 CLT 提供的 `/usr/bin/python3`，该采集子集兼容 Python 3.9。
-本次发布不提供 Apple 公证安装包，不承诺所有系统版本均已验证。
+## 构建与安装
 
-## 构建与打开
+需要 macOS 13+、Xcode Command Line Tools 和 Python 3.10+。
+App 内置采集入口使用 CLT 的 `/usr/bin/python3`，该子集兼容 Python 3.9。
 
 ```bash
 git clone https://github.com/chengxianhe/agent-progress-card.git
@@ -31,125 +31,127 @@ bash desktop/build.sh
 open build/AgentProgressCard.app
 ```
 
-若没有编译工具，先运行 `xcode-select --install`。应用用本机架构构建并作 ad-hoc 签名。
-构建脚本在检测到重复且内容一致的 CLT module map 时使用局部 overlay，不修改系统 SDK。
+缺少编译工具时先运行 `xcode-select --install`。应用按本机架构构建，使用 ad-hoc 签名，未经过 Apple 公证。
+构建脚本只使用局部 module-map overlay，不修改系统 SDK。
 
-可选安装：
+可选安装到 `~/Applications/AgentProgressCard.app`：
 
 ```bash
 python3 desktop/install.py
 ```
 
-安装到 `~/Applications/AgentProgressCard.app`，目标已存在时拒绝覆盖。
-旧版用户请先阅读 [迁移说明](docs/migration.md)。关闭窗口只隐藏窗口，Cmd+Q 完全退出。
+目标已存在时安装器拒绝覆盖，更新请先阅读[迁移说明](docs/migration.md)，保留旧版本与本机状态。
+关闭窗口仅隐藏窗口；Cmd+Q 退出 App 并停止它启动的事件采集。微信后台服务单独管理。
 
-## 让卡片显示任务
+## 绑定会话与显示进度
 
-单纯打开窗口不会自动猜测任务。由助手或脚本明确发布状态：
-
-```bash
-PYTHONPATH=src python3 -m agent_progress_card begin \
-  --title '更新项目文档' --action '核对功能与现状'
-# 将返回的 task_id 填入下方 TASK_ID。
-PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
-  --status running --action '检查文档链接' --detail '正在核对本地引用'
-PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
-  --status succeeded --action '文档检查完成'
-```
-
-状态有 `running / waiting / succeeded / failed`；待人工审查时使用 `waiting`。
-新任务默认不覆盖活动任务，`begin --replace` 只切换显示，不取消助手正在执行的工作。
-也可在虚拟环境中 `python3 -m pip install .`，使用 `agent-progress-card` 命令。
-
-需要你在几个方案中选择时，助手先发布编号选项：
-
-```bash
-PYTHONPATH=src python3 -m agent_progress_card choice \
-  --question '先做哪项？' --option '修复卡片' --option '完善微信'
-```
-
-微信回复 `1` 或 `2`，或点击卡片选项；成功送达后自动清除。仅在聊天里直接答复，
-或主动取消这道题时手动运行：
-
-```bash
-PYTHONPATH=src python3 -m agent_progress_card clear-choice
-```
-
-卡片会弹出问题与选项，也保留页内选择入口；已连接的微信在回信上下文有效时会收到相同通知。
-没收到时，在扫码绑定的机器人会话发送“选项”，即可取回当前问题，再回复 `1`、`2` 等编号。
-微信编号会转换为完整选项文本，作为用户消息送入当前 Codex 会话；也可以直接点击卡片选项，
-通过本机会话发送，不依赖微信转发进程。收到会话的投递回执后，选项自动关闭，卡片保留短暂回执；
-这表示消息被接收，不代表任务已经完成。结果不确定时禁止重复选择，先在桌面核对。
-普通文字仍原样转入会话。这里处理的是工作方案选择。
-旧选项在 24 小时后自动过期，切换绑定会话后也不会显示。
-微信接口的回信上下文会过期；长期未在微信发消息时，通知会保留排队。
-此时在绑定的机器人会话发“选项”或“进度”，转发器获得新上下文后优先回复当前问题。
-普通选项需由助手显式发布到小看板。Codex 命令行自身显示的交互式选项不会被自动捕获；
-微信回复编号也不会直接回答那份终端请求。工具和系统权限仍只能在原客户端批准。
-
-卡片显示的是**本轮平均输出 token/秒**，按记录中的输出用量与本轮经过时间计算；
-包含工具等待时间，只有收到用量事件后才显示，不能代表模型瞬时生成速度或费用。
-
-## 显示真实工具调用
-
-绑定你明确指定的本机 Codex 会话记录与会话 UUID：
+卡片不会自动猜测当前任务。绑定你明确指定的会话记录与对应 UUID：
 
 ```bash
 PYTHONPATH=src python3 -m agent_progress_card.attach \
   --transcript /absolute/path/to/rollout.jsonl --thread-id THREAD_UUID
 ```
 
-两项必须来自同一会话，绑定会校验文件元数据；只读最近一轮及后续公开事件。
-可从会话工具提供的记录路径定位；没有可靠路径/UUID 时不要猜测或批量扫描其他聊天。
-App 启动采集子进程，退出后采集停止；没有开机自启动或全局 hooks。
+两项必须来自同一会话；只读最近一轮及后续公开事件。不要批量扫描其他聊天来猜测绑定目标。
+App 退出后采集停止；微信常驻服务不会替代这个采集进程。
 
-会话格式和本地控制接口为实验性适配，历史验证基于 Codex CLI 0.167.0。
-客户端升级后需要重新验证兼容性；本项目不是官方稳定接口或官方产品。
+也可以由助手或脚本显式发布任务：
 
-## 可选：通过本人微信交互
+```bash
+PYTHONPATH=src python3 -m agent_progress_card begin \
+  --title '更新项目文档' --action '核对功能与现状'
+# 使用上一步返回的 TASK_ID。
+PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
+  --status running --action '检查文档链接'
+PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
+  --status succeeded --action '自动检查完成'
+```
 
-先完成上述绑定，并在 Codex 客户端打开对应会话，然后运行：
+状态支持 `running / waiting / succeeded / failed`；等待人工审查时使用 `waiting`。
+最终回复和 `succeeded` 状态不等于用户已验收。`begin --replace` 只切换显示，不取消正在执行的任务。
+
+## 通过本人微信交互
+
+先绑定会话，并在 Codex 客户端打开该会话，然后启动：
 
 ```bash
 PYTHONPATH=src python3 -m agent_progress_wechat.relay \
   --state-dir "$PWD/runs/wechat" --thread-id THREAD_UUID
 ```
 
-保持小看板与该命令运行，在小看板连接设置内扫码、输入配对码并确认连接。
-微信端需支持相应 iLink/ClawBot 连接，是否可用以账号和服务返回为准。
-连接后普通文字送入绑定会话；`进度`、`结果`、`帮助`由本地记录回答。
-详细边界、停止与故障处理见 [微信连接](docs/wechat.md)。
+在小看板连接设置里扫码、输入需要的配对码。账号需支持 iLink/ClawBot，是否可用以实际服务返回为准。
+仅接收绑定本人的文字；消息送入原会话，不另开一个 AI 对话。详见[微信连接](docs/wechat.md)。
 
-不读取个人微信聊天列表、群聊或数据库。权限审批仍在原客户端处理；微信“同意”不能代替审批。
-轮询和显示本身不调用模型；转入会话的普通文字会触发正常模型用量。
+| 微信内容 | 处理方式 |
+| --- | --- |
+| 普通文字 | 送入已绑定的 Codex 会话，产生正常模型用量 |
+| `进度` / `结果` / `帮助` | 从本地状态回复，不转成新的模型任务 |
+| `选项` | 查询普通看板选项；没有时显示最近的原生提问记录 |
+| `审批` | 查询已启用的单次命令审批 |
 
-## 数据与隐私
+轮询、状态显示及本地查询本身不调用模型。退出 App 不等于停止微信同步；暂停请用“停止微信同步”。
 
-- 卡片状态保存在 `~/Library/Application Support/AgentProgressCard/`。
-- 微信凭据和队列保存在你指定的 `--state-dir`，默认示例位于已忽略的 `runs/wechat/`。
-- 使用私有文件权限、脱敏和长度限制；脱敏不是覆盖所有敏感内容的保证。
+### 三种选项的区别
+
+| 类型 | 展示与回复 |
+| --- | --- |
+| 助手显式发布的普通看板选项 | 卡片点选或微信编号回复，作为用户消息送入当前会话 |
+| Codex 原生普通表单 | 镜像题目与选项，需回原客户端作答；微信编号不冒充表单提交 |
+| 命令权限审批 | 显式启用后，微信决定通过正式审批协议回传；不作为聊天消息发送 |
+
+发布普通看板选项：
+
+```bash
+PYTHONPATH=src python3 -m agent_progress_card choice \
+  --question '先做哪项？' --option '修复卡片' --option '完善微信'
+```
+
+收到投递回执后自动关闭选项；回执不确定时不会自动重发。用户在聊天里直接回答或取消问题时，
+由助手调用 `PYTHONPATH=src python3 -m agent_progress_card clear-choice`。旧选项 24 小时后过期。
+
+### 手机单次命令审批
+
+正常停止旧 relay，再在原启动命令中加入 `--remote-approvals`。设置按绑定账号和会话保存在本机，
+重启沿用；以 `--no-remote-approvals` 重启可关闭。默认不开启，也不修改 Codex 的权限或模型配置。
+
+微信按服务端提供的原顺序列出选项。例如某次请求为：
+
+1. 仅此次允许
+2. 允许同类命令以后执行（需电脑端操作）
+3. 拒绝并结束本轮
+
+编号以每次实际通知为准。回复“选项号 A审批编号”；仅有一项已通知审批、且没有普通选项时可直接回数字。
+通知会展示命令、目录和原因；编号最多有效 10 分钟，断线、重启或电脑已处理后失效。
+命令正文最多 1,400 字符；超长或其他不能展示的请求会说明原因，仍需电脑确认。
+支持单次允许、拒绝或取消；长期规则、会话放行、额外权限及不能完整展示的命令留在电脑处理。
+审批关闭回执不等于命令成功，执行结果仍看任务进度。详见[审批实现与验证](docs/remote-approvals.md)。
+
+### 后台常驻与收不到消息
+
+可显式安装用户级 LaunchAgent，使桥接在登录后运行、异常退出后恢复；不会重复启动轮询进程，
+手动停止仍有效。安装与停用见[常驻说明](docs/wechat-resident.md)。
+
+常驻不能保证微信一直接受主动推送。微信返回 `-2 / prepare failed` 时，程序可能仍正常接收消息，
+只是暂时发不出去；这不等于登录凭据失效。通知保留并重试，最长退避 5 分钟。
+在机器人会话发送 `进度` 或 `选项` 可刷新回信上下文；确实显示登录失效时才重新扫码。
+接口接受消息不证明手机已显示；电脑休眠、断网、Codex 关闭也会影响使用。
+
+## 数据、兼容性与验证
+
+- 卡片状态位于 `~/Library/Application Support/AgentProgressCard/`；微信凭据和队列位于指定的 `--state-dir`。
+- 不提交凭据、原始聊天、真实会话标识、数据库、二维码、日志或构建产物；脱敏不能保证覆盖所有敏感内容。
 - 历史最多保留 12 个任务，每任务最多 20 条调用与 30 条工作记录，不是完整审计系统。
-- 完成回复不自动代表任务通过人工验收；服务心跳不代表模型正在工作。
-- 不提交凭据、原始聊天、数据库、二维码或构建产物。
-
-## 开发与验证
+- Codex 会话格式与控制通道属于实验性适配，已验证版本为 CLI 0.167.0；客户端升级后需复验。
 
 ```bash
 bash scripts/verify.sh
 ```
 
-Python 使用标准库测试；macOS 同时构建卡片与可选扫码窗口，运行六组原生模型测试。
-日志位于忽略的 `build/verification/`。测试使用临时目录与合成数据，不连接真实微信。
-原生窗口交互与真实扫码须另行验证，不能由单测通过推断。
+当前包括 131 项 Python 测试、两个 macOS 原生入口构建和 7 组原生模型测试。
+测试使用合成数据，不连接真实微信；真实收发、手机审批与桌面交互需另行验证。
+日志保存在已忽略的 `build/verification/`；验证范围与限制见[验证记录](docs/verification.md)。
 
-```text
-desktop/                    SwiftUI/AppKit 界面、构建与安装工具
-src/agent_progress_card/    状态 CLI、绑定、事件采集与脱敏
-src/agent_progress_wechat/  本人微信桥接与实验性当前会话通道
-tests/                     Python 回归测试与合成原生测试数据
-scripts/                   可重复的验证入口
-docs/                      微信与迁移说明
-```
+源码分布：`desktop/` 为原生界面与构建工具，`src/agent_progress_card/` 为状态与事件采集，
+`src/agent_progress_wechat/` 为微信桥接，`tests/` 为回归测试。
 
-独立仓库使用自己的包名与 Git 历史，不依赖原演示工程。
-许可证为 [MIT](LICENSE)，来源与保留声明见 [NOTICE](NOTICE)。维护者：`chengxianhe`。
+本仓库有独立包名和 Git 历史，不依赖原演示引擎。许可证为 [MIT](LICENSE)，来源声明见 [NOTICE](NOTICE)。
