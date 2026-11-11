@@ -48,7 +48,7 @@ def command_reply(text, state, feed):
     if text in ("帮助", "/help"):
         return ("已连接你指定的桌面会话。普通文字会作为你的消息送入该会话，保留上下文。\n"
                 "选项：获取当前待选问题\n进度：查看小看板当前进度\n结果：查看最近公开回复\n"
-                "审批：查询已显式启用的单次命令审批；按通知编号决定。未支持类型仍在原客户端处理，不自动同意。")
+                "审批：查看手机授权及表单；按通知编号决定，或用“填写 A编号 JSON”提交文字。不自动同意。")
     if text in ("选项", "/choice"):
         if feed.get("choice"):
             return choice_text(feed["choice"])

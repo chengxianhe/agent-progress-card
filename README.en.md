@@ -4,7 +4,7 @@
 
 A native macOS card showing an AI assistant's task status, public work notes, tool calls,
 latest reply and task history. An optional owner-only WeChat relay sends tasks to an already-open,
-explicitly bound Codex conversation and supports one-time command approvals from a phone.
+explicitly bound Codex conversation and supports typed phone approvals and form replies.
 
 No web server or additional model API key is required. This is not an agent engine: work stays in
 Codex. It does not expose hidden reasoning or read unrelated conversations, personal chats or groups.
@@ -85,7 +85,7 @@ Polling and local state queries do not call the model. Use the card's stop butto
 | Type | How it is answered |
 | --- | --- |
 | Explicit card choice | Card click or WeChat number becomes a user message in the bound conversation |
-| Native ordinary form | Mirrored as a read-only notice; answer in the original client |
+| Native ordinary form | Numbered/JSON replies when a formal request arrives; transcript-only records cannot submit a native answer |
 | Command approval | Opt-in formal approval response, sent only after the owner explicitly chooses |
 
 Publish an ordinary card choice:
@@ -99,7 +99,7 @@ Acknowledged delivery clears the choice. Ambiguous delivery is not automatically
 If the user answers directly in chat or cancels, call
 `PYTHONPATH=src python3 -m agent_progress_card clear-choice`. Choices expire after 24 hours.
 
-### One-time command approvals
+### Phone approvals and forms
 
 Stop the existing relay normally, then restart with `--remote-approvals` to opt in.
 This preference is retained for the paired account and thread. Restart with `--no-remote-approvals`
@@ -110,13 +110,17 @@ approval code, separated by a space. A bare number works only for one notified p
 with no competing ordinary choice. Never assume that a fixed number always means approval.
 
 Compact prompts show the command, working directory, reason and numbered options.
-Command previews are limited to 1,400 characters (directory: 300; reason: 400).
+Command previews support up to 60,000 characters (directory: 300; reason: 400). Long content is sent in complete numbered parts of 2,200 characters.
 Fallback notices explain why desktop confirmation is needed without echoing sensitive content.
-Long-command approval on the phone is not yet supported. Codes expire within 10 minutes and become
+Approval is blocked until all detail parts have been sent. Codes expire within 10 minutes and become
 invalid after disconnection, restart or desktop resolution. One-time allow, decline and cancel are supported;
 options granting session-wide or persistent permission remain desktop-only. Unsupported or incomplete
 permission previews also stay in the original client. A request-closed receipt is not proof of command success.
 See [approval implementation and validation](docs/remote-approvals.md).
+
+MCP tool Allow/Cancel, formal native questions, supported primitive MCP forms, one-time file changes with complete diffs, and turn-scoped permission requests use their own protocol responses. For one notified request without a competing card choice, `Allow`/`Cancel` are also accepted. Text/multiple-question answers use `填写 A_CODE {"question_id":"answer"}` as shown in the notice. Long supported previews are split into numbered parts; approval waits until all parts have been sent.
+
+Session/persistent grants are not enabled. Sensitive or unsupported schemas and identity-verification flows receive a limitation notice. Host-only UI forms do not necessarily emit a formal app-server request; ordinary assistant choices should use explicit card choices so the user can answer by phone. Test coverage of an adapter does not establish live compatibility for every client dialog.
 
 ### Background operation and missing replies
 
@@ -143,9 +147,13 @@ Local Codex integration is experimental, tested with CLI 0.167.0. Revalidate aft
 bash scripts/verify.sh
 ```
 
-Currently runs 131 Python tests, both native builds and seven native model suites on macOS.
+Currently runs 148 Python tests, both native builds and seven native model suites on macOS.
 Tests use synthetic data and do not contact WeChat. Live messaging, mobile approvals and window interaction
 require separate validation. Logs stay in ignored `build/verification/`; see [verification scope](docs/verification.md).
+
+Live phone checks succeeded for one-time Allow in a four-option MCP prompt and a numbered reply to a 3,798-character command sent in two parts.
+The 60,000-character boundary, exact reassembly and incomplete-delivery guard have automated coverage, not equivalent live WeChat validation.
+Formal forms, file changes and turn-scoped permission adapters still need their respective live phone checks. Transcript-only client forms cannot submit a native answer through WeChat.
 
 Sources: `desktop/` for native UI/build tools, `src/agent_progress_card/` for state and collection,
 `src/agent_progress_wechat/` for the relay, and `tests/` for regression tests.

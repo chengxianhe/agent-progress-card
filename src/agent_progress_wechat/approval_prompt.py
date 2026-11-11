@@ -30,13 +30,13 @@ def rejection_reason(params):
     if not isinstance(command, str) or not command.strip() or not isinstance(cwd, str) or not cwd or not isinstance(reason, str):
         return '请求缺少完整的命令、目录或原因'
     values = (command, cwd, reason)
-    for value, limit, label in zip(values, (1400, 300, 400), ('命令正文', '目录', '原因')):
+    for value, limit, label in zip(values, (60000, 300, 400), ('命令正文', '目录', '原因')):
         if len(value) > limit:
             return f'{label}超过微信审批的 {limit} 字符展示上限'
     for value in values:
         if any(unicodedata.category(c).startswith('C') and c not in '\n\t' for c in value):
             return '请求含不能安全展示的控制字符'
-        if PROTECTED.search(value) or clean_text(value, 2000) != value.replace(str(Path.home()), '~'):
+        if PROTECTED.search(value) or clean_text(value, 64000) != value.replace(str(Path.home()), '~'):
             return '请求涉及敏感内容，脱敏后无法完整核对授权内容'
     return None
 
@@ -45,7 +45,7 @@ def display(params):
     if rejection_reason(params):
         return None
     values = (params['command'], params['cwd'], params.get('reason') or '执行此命令需要你的确认')
-    command, cwd, reason = (clean_text(v, 2000) for v in values)
+    command, cwd, reason = (clean_text(v, 64000) for v in values)
     return f'命令：\n{command}\n目录：{cwd}\n原因：{reason}'
 
 
@@ -80,5 +80,13 @@ def parse_reply(text):
     return match[2].upper(), 'accept' if match[1] == '批准' else 'decline'
 
 
+def label_reply(text):
+    match = re.fullmatch(r'(allow|accept|允许|cancel|取消)(?:\s+(A[0-9A-Fa-f]{10}))?', text.strip(), re.I)
+    if not match:
+        return None
+    action = 'accept' if match[1].lower() in ('allow', 'accept', '允许') else 'cancel'
+    return action, match[2].upper() if match[2] else None
+
+
 def is_approval_text(text):
-    return text in ('审批', '/approvals') or text.startswith(('批准', '拒绝')) or bool(re.fullmatch(r'\d+\s+A[0-9A-Fa-f]{10}', text.strip()))
+    return bool(label_reply(text)) or text in ('审批', '/approvals') or text.startswith(('批准', '拒绝', '填写')) or bool(re.fullmatch(r'\d+\s+A[0-9A-Fa-f]{10}', text.strip()))

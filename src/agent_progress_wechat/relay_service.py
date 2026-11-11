@@ -12,7 +12,7 @@ from .local_socket import RpcError, TransportError
 from .relay_mirror import check_binding, choice_text, command_reply, mirror, snapshot
 from .relay_store import RelayStore
 from .notification_delivery import send_outgoing
-from .approval_prompt import is_approval_text, numbered_reply
+from .approval_prompt import is_approval_text, numbered_reply, label_reply
 from .approval_service import run_approvals
 from .approval_state import ApprovalState
 
@@ -51,10 +51,11 @@ def seed_previous_connection(store, directory, owner):
 def deliver(store, session, message, directory, approvals=None):
     """Only mark sending immediately before the mutating RPC; uncertainty is terminal."""
     check_binding(directory, session.thread_id)
-    if approvals is not None and numbered_reply(message["text"]) and approvals.has_recent_prompt():
+    selected = numbered_reply(message["text"]) or label_reply(message["text"])
+    if approvals is not None and selected and approvals.has_recent_prompt():
         with choice_lock(directory):
-            if numbered_reply(message["text"])[1] is None and read_choice(directory, session.thread_id):
-                store.mark(message["id"], "local", reply="同时有普通选项和命令审批，请回复「选项号 A审批编号」处理审批；普通选项请在小看板点击。")
+            if selected[1] is None and read_choice(directory, session.thread_id):
+                store.mark(message["id"], "local", reply="同时有普通选项和原生请求，请回复「选项号 A审批编号」处理审批；普通选项请在小看板点击。")
             else:
                 approvals.handle(message)
         return
@@ -162,7 +163,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             problems.append("后台仍在运行；微信暂时拒收回复，5 分钟内重试；可发“进度”刷新回信")
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
                   "status": "retrying" if problems else "connected", "message": "；".join(problems) if problems else
-                  ("已连接当前会话；本人微信单次命令审批已启用，发送“审批”查看。" if approvals else
+                  ("已连接当前会话；手机授权和表单回复已启用，发送“审批”查看。" if approvals else
                    "已连接当前会话。微信文字会送入这段聊天，小看板进度会回传。"), **store.summary()})
 
     def poller():

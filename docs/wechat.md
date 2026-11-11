@@ -13,7 +13,7 @@ PYTHONPATH=src python3 -m agent_progress_wechat.relay \
 旧监听会停止，旧凭据会先备份到本机私有状态目录，再在原状态目录显示新二维码。手机微信扫码确认后恢复当前会话转发。
 若显示“微信回信上下文已过期”，先在扫码绑定的机器人会话发送“选项”或“进度”刷新回信上下文；
 这与登录凭据失效是两种不同状态。程序不再假设回信上下文只有 90 秒有效期。
-普通原生输入表单会作为只读通知同步；查看题目和选项后需回原客户端作答。
+普通原生输入表单保留只读记录；收到正式 app-server 请求时另发带 A 编号的手机作答通知。只有记录而没有正式请求时，不能把微信文字当作原生表单回执。日常方案选择使用显式看板选项。
 显式发布的看板选项仍支持微信编号与卡片按钮。
 不要上传 `credentials.json`、`relay.sqlite3`、二维码或含真实消息的日志。
 
@@ -63,7 +63,7 @@ PYTHONPATH=src python3 -m agent_progress_wechat \
   [腾讯协议说明](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md)要求回信携带入站上下文，
   不提供本实现可依赖的 90 秒有效期保证。接口接受请求也不能证明手机已显示通知。
 
-## 本人微信单次命令审批（实验性）
+## 本人微信授权与表单（实验性）
 
 首次启用时，在原 relay 启动命令增加 `--remote-approvals`；设置保存在绑定账号和会话的
 本机 relay 数据库中，重新扫码/重启沿用。关闭时以 `--no-remote-approvals` 重启同一 relay。
@@ -72,7 +72,7 @@ PYTHONPATH=src python3 -m agent_progress_wechat \
 - 收到「待授权 A…」后，检查完整命令、目录和原因，再按原生弹窗顺序展示编号；回复「选项号 A编号」。单项审批且没有普通选项时可只回数字。
 - 「审批」查询当前编号并重新排队通知；单独数字只在唯一已通知审批且没有普通选项时生效；有歧义时必须带审批编号。
 - 编号有效期 10 分钟，且只适用于当前账号、会话和连接。重启/断线/电脑端处理后失效。
-- 只支持完整可展示的 command/humanCommand 单次命令审批。
+- 支持完整可展示的 command/humanCommand 单次命令审批；MCP 工具授权、正式原生问题、简单 MCP 表单、单次文件修改和本轮权限申请见 [适配说明](remote-approvals.md)。
   保留服务端 availableDecisions 顺序：accept/decline/cancel 按实际选项执行；长期规则和会话放行
   显示原位置并注明电脑端操作。cancel 会结束本轮，不能把“拒绝”悄悄换成 cancel。包含额外权限、专用网络授权、
   敏感内容、过长命令及其他审批类型时，保留电脑原生确认。不会在微信输出被隐藏的命令来请求批准。
@@ -84,3 +84,6 @@ PYTHONPATH=src python3 -m agent_progress_wechat \
 - 微信登录、回信窗口、电脑休眠等仍会影响送达；通知入队不等于手机显示。
 
 协议依据：[OpenAI App Server Approvals](https://learn.chatgpt.com/docs/app-server#approvals)。
+
+手机回复 `Allow`/`Cancel` 仅在唯一已通知请求、无竞争普通选项时生效；不能凭单词猜测未收到的授权。
+多题/文字表单使用 `填写 A编号 JSON对象`；问题 ID 和字段类型以通知为准。

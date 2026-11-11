@@ -39,7 +39,7 @@ python3 desktop/resident-plist.py --app "$HOME/Applications/AgentProgressCard.ap
 
 ## 验证范围
 
-完整自动验证通过：131 项 Python 测试、两个原生入口构建及 7 组原生模型测试。
+完整自动验证通过：148 项 Python 测试、两个原生入口构建及 7 组原生模型测试。
 本机安装用户级 LaunchAgent 后，对转发进程执行停止测试，监督进程自动恢复了 relay，凭据未改变。
 
 未验证实际重启后的登录启动和长期睡眠/断网恢复。常驻恢复通过不代表微信消息已经送达；

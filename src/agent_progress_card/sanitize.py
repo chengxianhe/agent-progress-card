@@ -21,7 +21,7 @@ def clean_text(value, limit=1800):
     text = str(value or "").replace(str(Path.home()), "~")
     text = re.sub(r"(?i)\bBearer\s+[^\s\"']+", "Bearer [已隐藏]", text)
     text = re.sub(r"\b(?:sk-|ghp_|github_pat_|AKIA)[A-Za-z0-9_\-]{12,}", "[已隐藏凭据]", text)
-    text = re.sub(r'''(?ix)([\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization|cookie)[\w-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)''', r"\1[已隐藏]", text)
+    text = re.sub(r'''(?ix)(?<![\w-])([\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization|cookie)[\w-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)''', r"\1[已隐藏]", text)
     text = re.sub(r"(?i)(https?://)[^/@\s]+:[^/@\s]+@", r"\1[已隐藏]@", text)
     text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[邮箱已隐藏]", text)
     text = re.sub(r"(?<!\d)1[3-9]\d{9}(?!\d)", "[手机号已隐藏]", text)

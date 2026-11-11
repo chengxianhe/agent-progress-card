@@ -144,7 +144,7 @@ class ApprovalTests(unittest.TestCase):
             self.assertIsNone(self.store.next_message())
 
     def test_sensitive_or_partial_permission_prompts_stay_native(self):
-        variants = [dict(command='echo token=secret'), dict(command='x'*1401), dict(command='cat ~/.env'),
+        variants = [dict(command='echo token=secret'), dict(command='x'*60001), dict(command='cat ~/.env'),
                     dict(networkApprovalContext={'host': 'test'}), dict(additionalPermissions={'network': True}),
                     dict(kind='writeStdin'), dict(command=None), dict(availableDecisions=['accept']), dict(cwd=None)]
         for idx, values in enumerate(variants):
@@ -157,7 +157,7 @@ class ApprovalTests(unittest.TestCase):
 
     def test_native_fallback_explains_limits_without_echoing_request(self):
         variants = [
-            (dict(command='x' * 1401), '命令正文超过微信审批的 1400 字符展示上限'),
+            (dict(command='x' * 60001), '命令正文超过微信审批的 60000 字符展示上限'),
             (dict(cwd='x' * 301), '目录超过微信审批的 300 字符展示上限'),
             (dict(reason='x' * 401), '原因超过微信审批的 400 字符展示上限'),
             (dict(command='echo token=private-value'), '敏感内容'),
@@ -179,7 +179,7 @@ class ApprovalTests(unittest.TestCase):
                 self.assertNotIn('private-value', notice)
                 self.assertNotIn('x' * 100, notice)
         self.assertIsNone(self.state.claim('conn'))
-        self.assertIsNotNone(display(approval(command='x' * 1400)['params']))
+        self.assertIsNotNone(display(approval(command='x' * 60000)['params']))
 
     def test_approval_notification_precedes_progress_backlog(self):
         self.store.put('context', 'fresh')
