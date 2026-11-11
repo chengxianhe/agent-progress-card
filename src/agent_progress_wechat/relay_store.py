@@ -78,6 +78,9 @@ class RelayStore:
                     continue
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context',?)", (context,))
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context_at',?)", (str(time.time()),))
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_paused_until','0')")
+                # Fresh owner input makes pending notifications immediately eligible again.
+                self.db.execute("UPDATE outbox SET due=0 WHERE delivered=0")
                 status = "queued"
                 error = ""
                 if not text:
@@ -108,11 +111,12 @@ class RelayStore:
 
     def outgoing(self):
         with self.lock:
-            if not self.get("context") or time.time() - float(self.get("context_at", "0")) >= 90:
+            if not self.get("context") or time.time() < float(self.get("send_paused_until", "0")):
                 return None
-            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND attempts<5 AND due<=? "
+            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND due<=? "
                                   "ORDER BY CASE WHEN id LIKE 'local:%' THEN 0 WHEN id LIKE 'choice:%' THEN 1 "
-                                  "WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, rowid LIMIT 1", (time.time(),)).fetchone()
+                                  "WHEN id LIKE 'approval:%' OR id LIKE 'approval-result:%' THEN 1 "
+                                  "WHEN id LIKE 'prompt:%' THEN 2 WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, rowid LIMIT 1", (time.time(),)).fetchone()
             return dict(row) if row else None
 
     def sent(self, identity, success):
@@ -120,7 +124,11 @@ class RelayStore:
             if success:
                 self.db.execute("UPDATE outbox SET delivered=1 WHERE id=?", (identity,))
             else:
-                self.db.execute("UPDATE outbox SET attempts=attempts+1,due=? WHERE id=?", (time.time() + 30, identity))
+                row = self.db.execute("SELECT attempts FROM outbox WHERE id=?", (identity,)).fetchone()
+                if row:
+                    delay = min(300, 30 * (2 ** min(row[0], 4)))
+                    self.db.execute("UPDATE outbox SET attempts=attempts+1,due=? WHERE id=?",
+                                    (time.time() + delay, identity))
 
     def summary(self):
         with self.lock:

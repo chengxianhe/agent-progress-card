@@ -19,3 +19,8 @@ wechat-source.json
 *.sqlite*
 *.pem
 *.key
+
+# Local supervisor state, transcripts and logs
+resident.json
+*.jsonl
+*.log

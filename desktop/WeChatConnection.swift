@@ -39,6 +39,10 @@ final class WeChatConnectionModel: ObservableObject {
         if !issue.isEmpty { return "微信连接待检查" }
         if state?.status == "expired" { return "微信登录已失效" }
         if state?.status == "stopped" { return "微信同步已停止" }
+        if state?.status == "retrying" {
+            if let pending = state?.unsent, pending > 0 { return "微信有 \(pending) 条待送达 · 查看原因" }
+            return "微信同步待处理 · 查看原因"
+        }
         return "微信连接"
     }
 

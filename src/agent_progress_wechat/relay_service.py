@@ -1,5 +1,4 @@
 """Current-session mode: durable incoming text -> same thread; card -> WeChat."""
-import hashlib
 import sqlite3
 import threading
 import time
@@ -12,6 +11,10 @@ from .ilink import Client, LinkError
 from .local_socket import RpcError, TransportError
 from .relay_mirror import check_binding, choice_text, command_reply, mirror, snapshot
 from .relay_store import RelayStore
+from .notification_delivery import send_outgoing
+from .approval_prompt import is_approval_text, numbered_reply
+from .approval_service import run_approvals
+from .approval_state import ApprovalState
 
 
 def selected_message(text, choice):
@@ -45,9 +48,22 @@ def seed_previous_connection(store, directory, owner):
         old.close()
 
 
-def deliver(store, session, message, directory):
+def deliver(store, session, message, directory, approvals=None):
     """Only mark sending immediately before the mutating RPC; uncertainty is terminal."""
     check_binding(directory, session.thread_id)
+    if approvals is not None and numbered_reply(message["text"]) and approvals.has_recent_prompt():
+        with choice_lock(directory):
+            if numbered_reply(message["text"])[1] is None and read_choice(directory, session.thread_id):
+                store.mark(message["id"], "local", reply="同时有普通选项和命令审批，请回复「选项号 A审批编号」处理审批；普通选项请在小看板点击。")
+            else:
+                approvals.handle(message)
+        return
+    if is_approval_text(message["text"]):
+        if approvals is None:
+            store.mark(message["id"], "local", reply="微信审批未启用，请在电脑端确认。")
+        else:
+            approvals.handle(message)
+        return
     if message["text"] in ("选项", "/choice"):
         with choice_lock(directory):
             choice = read_choice(directory, session.thread_id)
@@ -58,6 +74,12 @@ def deliver(store, session, message, directory):
                     store.db.execute("DELETE FROM outbox WHERE id=? AND delivered=0", ("choice:" + choice["id"],))
             reply = "上次选择的投递结果不确定，请先在桌面核对。" if blocked else (
                 choice_text(choice) if choice else "当前没有待选问题。")
+            if not choice:
+                try:
+                    state, feed = snapshot(directory, session.thread_id)
+                    reply = command_reply(message["text"], state, feed)
+                except (OSError, ValueError, KeyError, TypeError):
+                    reply = "当前没有看板选项；客户端提问记录暂不可读，请在原客户端核对。"
             store.mark(message["id"], "local", reply=reply)
         return
     if message["text"] in ("帮助", "/help", "进度", "/status", "结果", "/result"):
@@ -75,6 +97,15 @@ def deliver(store, session, message, directory):
             if not choice and recent_choice_result(directory, session.thread_id, index):
                 store.mark(message["id"], "local", reply="这项选择已经收到，无需重复发送。")
                 return
+            if not choice:
+                try:
+                    _, feed = snapshot(directory, session.thread_id)
+                except (OSError, ValueError, KeyError, TypeError):
+                    feed = {}
+                question = feed.get("latest_question")
+                if question and 0 <= time.time() - question.get("time", 0) <= 86400:
+                    store.mark(message["id"], "local", reply="最近的问题来自客户端原生表单；请在原客户端选择。这个编号没有代答表单，也没有作为新任务发送。")
+                    return
             return deliver_text(store, session, message, directory, choice)
     return deliver_text(store, session, message, directory)
 
@@ -107,13 +138,18 @@ def deliver_text(store, session, message, directory, choice=None):
         connection.close()
 
 
-def run_relay(directory, credentials, thread_id, socket_path, card_directory, stop):
+def run_relay(directory, credentials, thread_id, socket_path, card_directory, stop, remote_approvals=None):
     store = RelayStore(directory, credentials["owner"], thread_id)
     seed_previous_connection(store, directory, credentials["owner"])
     session = CurrentSession(socket_path, thread_id)
     client = Client(credentials)
     health, health_lock = {}, threading.RLock()
     auth_expired = threading.Event()
+    if remote_approvals is not None:
+        store.put("remote_approvals_enabled", "1" if remote_approvals else "0")
+    enabled = store.get("remote_approvals_enabled") == "1"
+    approval_state = ApprovalState(store, thread_id)
+    approvals = approval_state if enabled else None
 
     def health_update(component, problem=""):
         with health_lock:
@@ -122,11 +158,12 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
     def publish():
         with health_lock:
             problems = [p for p in health.values() if p]
-        if store.summary()["unsent"] and time.time() - float(store.get("context_at", "0")) >= 90:
-            problems.append("微信回信上下文已过期；请先在微信发送“进度”刷新连接")
+        if store.summary()["unsent"] and time.time() < float(store.get("send_paused_until", "0")):
+            problems.append("后台仍在运行；微信暂时拒收回复，5 分钟内重试；可发“进度”刷新回信")
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
                   "status": "retrying" if problems else "connected", "message": "；".join(problems) if problems else
-                  "已连接当前会话。微信文字会送入这段聊天，小看板进度会回传。", **store.summary()})
+                  ("已连接当前会话；本人微信单次命令审批已启用，发送“审批”查看。" if approvals else
+                   "已连接当前会话。微信文字会送入这段聊天，小看板进度会回传。"), **store.summary()})
 
     def poller():
         while not stop.is_set():
@@ -147,22 +184,17 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
 
     def sender():
         while not stop.is_set():
-            item = store.outgoing()
-            if not item:
-                stop.wait(.5)
-                continue
             try:
-                wire_id = "relay_" + hashlib.sha256(item["id"].encode()).hexdigest()[:32]
-                client.send(item["text"], store.get("context"), wire_id)
-                store.sent(item["id"], True)
+                if not send_outgoing(store, client):
+                    stop.wait(.5)
+                    continue
                 health_update("send")
+                stop.wait(1)
             except LinkError as error:
                 if error.stale_context:
-                    store.put("context_at", "0")
-                    health_update("send", "微信回信上下文已过期；通知保留，请从微信发送“选项”或“进度”")
+                    health_update("send", "微信暂时拒收回复（-2）；通知已保留，后台仍在接收消息和重试")
                 else:
-                    store.sent(item["id"], False)
-                    health_update("send", str(error) + "，回复保留待发送")
+                    health_update("send", str(error) + "，回复保留并退避重试")
                 if error.expired:
                     auth_expired.set()
                     stop.set()
@@ -175,6 +207,9 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             stop.set()
 
     threads = [threading.Thread(target=guarded, args=(poller,)), threading.Thread(target=guarded, args=(sender,))]
+    if approvals is not None:
+        threads.append(threading.Thread(target=run_approvals,
+            args=(store, session, card_directory, stop, health_update, approvals)))
     for thread in threads:
         thread.start()
     next_probe = 0
@@ -189,7 +224,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             try:
                 message = store.next_message()
                 if message:
-                    deliver(store, session, message, card_directory)
+                    deliver(store, session, message, card_directory, approvals)
                     health_update("codex")
                     next_probe = time.monotonic() + 10
                 elif time.monotonic() >= next_probe:
@@ -197,7 +232,9 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                     try:
                         thread = session.inspect(connection)
                         flags = thread["status"].get("activeFlags", [])
-                        health_update("codex", "当前任务等待你在原客户端确认" if "waitingOnApproval" in flags else "")
+                        waiting = ("当前任务等待授权；微信发送“审批”查看，未支持的类型仍需电脑确认" if approvals else
+                                   "当前任务等待你在原客户端确认")
+                        health_update("codex", waiting if "waitingOnApproval" in flags else "")
                     finally:
                         connection.close()
                     next_probe = time.monotonic() + 10

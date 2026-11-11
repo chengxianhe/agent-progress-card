@@ -28,6 +28,11 @@ def main():
     parser.add_argument("--socket", type=Path, default=Path.home() / ".codex/app-server-control/app-server-control.sock")
     parser.add_argument("--window", type=Path)
     parser.add_argument("--reconnect", action="store_true", help="停止旧监听并要求本人重新扫码")
+    approvals = parser.add_mutually_exclusive_group()
+    approvals.add_argument("--remote-approvals", dest="remote_approvals", action="store_true", default=None,
+                           help="启用并记住本人微信单次命令审批，仅绑定账号和会话有效")
+    approvals.add_argument("--no-remote-approvals", dest="remote_approvals", action="store_false",
+                           help="关闭本人微信单次命令审批，仍保留普通聊天")
     args = parser.parse_args()
     uuid.UUID(args.thread_id)
     os.umask(0o077)
@@ -79,7 +84,7 @@ def main():
             credential_path = directory / "credentials.json"
             credentials = read_json(credential_path) if credential_path.exists() else login(directory, stop)
             if not stop.is_set():
-                run_relay(directory, credentials, args.thread_id, args.socket, args.card_dir, stop)
+                run_relay(directory, credentials, args.thread_id, args.socket, args.card_dir, stop, args.remote_approvals)
         except LinkError as error:
             save_json(directory / "connection.json", {"mode": "current_session", "thread_id": args.thread_id,
                       "status": "expired" if error.expired else "error", "message": str(error)})

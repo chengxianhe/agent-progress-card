@@ -14,7 +14,7 @@ struct WeChatConnectionTests {
         let connected = try WeChatConnectionState.read(file)
         precondition(connected.mode == "current_session" && connected.unsent == 0)
         try write(["status": "expired", "message": "请重新扫码", "mode": "current_session",
-                   "thread_id": "01a1b00f-2a6b-7392-8f05-24a68092ea55"])
+                   "thread_id": "00000000-0000-4000-8000-000000000001"])
         let expired = try WeChatConnectionState.read(file)
         precondition(expired.status == "expired" && expired.thread_id != nil)
         try write(["status": "need_verifycode", "message": "输入配对码", "qr": "https://example.test/qr"])

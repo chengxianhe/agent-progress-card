@@ -43,7 +43,8 @@ struct CardView: View {
     @State private var expanded = false
     @State private var pinned = true
     @State private var promptedChoiceID: String?
-    @State private var presentedChoice: CardChoice?
+    @State private var promptedQuestionID: String?
+    @State private var presentedPrompt: PromptPresentation?
     let resize: (Bool) -> Void
     let pin: (Bool) -> Void
 
@@ -102,17 +103,31 @@ struct CardView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(item: $presentedChoice) { ChoicePromptView(choice: $0) }
+        .sheet(item: $presentedPrompt) { prompt in
+            switch prompt {
+            case .choice(let choice): ChoicePromptView(choice: choice)
+            case .question(let question): NativeQuestionSheet(question: question)
+            }
+        }
         .onReceive(activity.$feed) { feed in
-            guard let choice = feed?.choice, choice.isValid else {
-                presentedChoice = nil
+            guard let feed, feed.error.isEmpty else {
+                presentedPrompt = nil
                 return
             }
-            if feed?.choice_result?.choice_id == choice.id && feed?.choice_result?.status != "retry" {
-                presentedChoice = nil
-            } else if promptedChoiceID != choice.id {
-                promptedChoiceID = choice.id
-                presentedChoice = choice
+            if let choice = feed.choice, choice.isValid,
+               !(feed.choice_result?.choice_id == choice.id && feed.choice_result?.status != "retry") {
+                if promptedChoiceID != choice.id {
+                    promptedChoiceID = choice.id
+                    presentedPrompt = .choice(choice)
+                }
+                return
+            }
+            if case .choice = presentedPrompt { presentedPrompt = nil }
+            if let question = feed.latest_question, question.isValid, !question.replayed,
+               promptedQuestionID != question.id,
+               Date().timeIntervalSince1970 - question.time < 86400 {
+                promptedQuestionID = question.id
+                presentedPrompt = .question(question)
             }
         }
     }

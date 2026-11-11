@@ -29,6 +29,7 @@ struct ActivityFeed: Decodable {
     let calls: [ToolActivity]
     let latest_reply: ConversationReply?
     let output_rate: Double?
+    let latest_question: NativeQuestion?
     let choice: CardChoice?
     let choice_result: CardChoiceResult?
 
@@ -40,6 +41,7 @@ struct ActivityFeed: Decodable {
         let feed = try JSONDecoder().decode(ActivityFeed.self, from: data)
         guard feed.version == 1, feed.calls.count <= 20, feed.pending.count <= 16,
               feed.output_rate.map({ $0.isFinite && $0 >= 0 && $0 < 100_000 }) != false,
+              feed.latest_question?.isValid != false,
               feed.choice?.isValid != false,
               feed.choice.map({ $0.thread_id == feed.thread_id }) != false,
               feed.choice_result?.isValid != false,

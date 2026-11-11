@@ -9,6 +9,7 @@ xcrun swiftc -parse-as-library -O -module-cache-path "$CARD_ROOT/build/swift-cac
   -vfsoverlay "$CARD_OVERLAY" \
   "$CARD_ROOT/desktop/TaskIdentity.swift" "$CARD_ROOT/desktop/ProgressState.swift" "$CARD_ROOT/desktop/CardWindow.swift" \
   "$CARD_ROOT/desktop/ActivityFeed.swift" "$CARD_ROOT/desktop/ActivityModel.swift" \
+  "$CARD_ROOT/desktop/NativeQuestion.swift" "$CARD_ROOT/desktop/NativeQuestionView.swift" \
   "$CARD_ROOT/desktop/CardChoice.swift" "$CARD_ROOT/desktop/ChoicePromptView.swift" \
   "$CARD_ROOT/desktop/ConversationReply.swift" "$CARD_ROOT/desktop/ConversationReplyView.swift" \
   "$CARD_ROOT/desktop/ToolActivityView.swift" \

@@ -53,6 +53,10 @@ struct TaskDashboard: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
+                           let question = activity.feed?.latest_question {
+                            NativeQuestionView(question: question)
+                        }
+                        if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
                            let choice = activity.feed?.choice, choice.isValid {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text("需要你选择：" + choice.question).font(.callout.weight(.semibold))

@@ -48,7 +48,12 @@ def command_reply(text, state, feed):
     if text in ("帮助", "/help"):
         return ("已连接你指定的桌面会话。普通文字会作为你的消息送入该会话，保留上下文。\n"
                 "选项：获取当前待选问题\n进度：查看小看板当前进度\n结果：查看最近公开回复\n"
-                "权限审批仍在原客户端处理；不会自动同意审批。")
+                "审批：查询已显式启用的单次命令审批；按通知编号决定。未支持类型仍在原客户端处理，不自动同意。")
+    if text in ("选项", "/choice"):
+        if feed.get("choice"):
+            return choice_text(feed["choice"])
+        question = feed.get("latest_question")
+        return ("最近的客户端提问：\n" + question["text"]) if question else "当前没有已记录的选项。"
     if text in ("进度", "/status"):
         if feed.get("choice"):
             if ((feed.get("choice_result") or {}).get("choice_id") == feed["choice"]["id"]
@@ -77,6 +82,10 @@ def mirror(store, state, feed):
         else:
             # A cleared question must not arrive after the user has already answered it on the card.
             store.db.execute("DELETE FROM outbox WHERE id LIKE 'choice:%' AND delivered=0")
+        questions = feed.get("question_notices") or [feed.get("latest_question")]
+        for question in questions:
+            if question and not question.get("replayed") and question.get("time", 0) >= since:
+                store.enqueue("prompt:" + question["id"], "客户端提问：\n" + question["text"])
         live_notes = [n for n in feed.get("notes", []) if not n.get("replayed") and n.get("time", 0) >= since]
         commentary = [n for n in live_notes if n.get("kind") == "commentary"]
         finals = [n for n in live_notes if n.get("kind") == "final"]

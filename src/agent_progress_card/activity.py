@@ -6,6 +6,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime
 
+from .native_question import native_question
 from .sanitize import clean_text, display_output
 
 
@@ -34,6 +35,8 @@ class ActivityReader:
         self.commentary = ""
         self.notes = OrderedDict()
         self.latest_reply = None
+        self.latest_question = None
+        self.question_notices = OrderedDict()
         self.replay_before = replay_before
         self.last_event_at = 0.0
         self.turn_active = False
@@ -70,6 +73,12 @@ class ActivityReader:
                 self.pending[call_id] = {"id": str(call_id), "name": clean_text(payload.get("name"), 120), "started_at": at}
                 while len(self.pending) > 16:
                     self.pending.popitem(last=False)
+                question = native_question(payload, at, self.replay_before)
+                if question:
+                    self.latest_question = question
+                    self.question_notices[question["id"]] = question
+                    while len(self.question_notices) > 8:
+                        self.question_notices.popitem(last=False)
                 self.turn_active = True
             elif kind in {"function_call_output", "custom_tool_call_output"}:
                 self.pending.pop(call_id, None)
@@ -167,4 +176,5 @@ class ActivityReader:
                 "turn_active": self.turn_active, "commentary": self.commentary,
                 "output_rate": self.output_rate,
                 "notes": list(self.notes.values()), "latest_reply": self.latest_reply,
+                "latest_question": self.latest_question, "question_notices": list(self.question_notices.values()),
                 "pending": list(self.pending.values()), "calls": list(self.calls.values())}
