@@ -16,7 +16,7 @@ Codex. It does not expose hidden reasoning or read unrelated conversations, pers
 - Redacted, bounded tool details and public work notes; latest completion reply.
 - Average output tokens per second for the current turn, including tool wait time.
 - Explicit numbered card choices, separate read-only native question notices, and optional command approvals.
-- Owner-only WeChat pairing, queued notifications, retry/backoff and delivery status.
+- Owner-only WeChat pairing, paused outbound delivery, coalesced ordinary updates and recovery status.
 - Optional per-user background supervision that restarts failed relays and respects manual stops.
 
 ## Build and install
@@ -129,10 +129,25 @@ It avoids duplicate pollers and respects manual stop requests. See [setup and re
 
 Supervision cannot remove WeChat's upstream delivery restrictions. `-2 / prepare failed` may mean that
 outbound replies are temporarily rejected while the local process still receives messages; it does not by
-itself establish login expiry. Notifications stay queued and retry with backoff up to five minutes.
-Send `进度` or `选项` to refresh the reply context; re-pair only when login is reported as expired.
+itself establish login expiry. Current-session mode pauses outbound delivery until a fresh owner message,
+rather than periodically probing the rejected context. Pending ordinary progress, final replies and successful
+input receipts each retain only the latest item; approvals, prompts and uncertain-delivery warnings are protected.
+Send `进度` or `选项` to resume delivery; re-pair only when login is reported as expired.
 Server acceptance does not prove the phone displayed a message. Sleep, network loss and a closed Codex
 conversation also affect operation.
+
+## Known limitations and pending fixes
+
+Isolated probes confirmed these unresolved cases; the 171 passing regression tests do not cover them:
+
+- A blocked ordinary message at the queue head can delay progress queries or approvals behind it.
+- A full outbound queue can also reject control messages.
+- Repeated partial-frame read timeouts lack a total deadline and may exceed the intended wait.
+- A continuously busy event stream can starve approval submission and expiry checks.
+
+Resident operation and fresh-message recovery do not guarantee phone control during these faults.
+Desktop diagnostics may be needed. This documentation update does not install an app, change
+credentials or claim these issues are fixed.
 
 ## Privacy, compatibility and verification
 
@@ -147,7 +162,7 @@ Local Codex integration is experimental, tested with CLI 0.167.0. Revalidate aft
 bash scripts/verify.sh
 ```
 
-Currently runs 148 Python tests, both native builds and seven native model suites on macOS.
+Currently runs 171 Python tests, both native builds and seven native model suites on macOS.
 Tests use synthetic data and do not contact WeChat. Live messaging, mobile approvals and window interaction
 require separate validation. Logs stay in ignored `build/verification/`; see [verification scope](docs/verification.md).
 
