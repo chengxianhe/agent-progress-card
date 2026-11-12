@@ -13,6 +13,11 @@ struct WeChatConnectionTests {
         try write(["status": "connected", "message": "已连接当前会话", "mode": "current_session", "unsent": 0])
         let connected = try WeChatConnectionState.read(file)
         precondition(connected.mode == "current_session" && connected.unsent == 0)
+        precondition(connected.send_paused == nil)
+        try write(["status": "retrying", "message": "推送暂停，发新消息恢复", "send_paused": true,
+                   "unsent": 2])
+        let paused = try WeChatConnectionState.read(file)
+        precondition(paused.send_paused == true && paused.unsent == 2)
         try write(["status": "expired", "message": "请重新扫码", "mode": "current_session",
                    "thread_id": "00000000-0000-4000-8000-000000000001"])
         let expired = try WeChatConnectionState.read(file)

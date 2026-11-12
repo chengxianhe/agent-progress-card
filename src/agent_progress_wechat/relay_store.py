@@ -1,11 +1,13 @@
 """Durable delivery receipts. An ambiguous Codex send is never blindly replayed."""
 import os
+import math
 import sqlite3
 import threading
 import time
 
 from agent_progress_card.sanitize import clean_text
 from .files import private_directory
+from .notification_queue import enqueue_notice, prepare_queue
 
 
 class RelayStore:
@@ -33,9 +35,12 @@ class RelayStore:
                 self.db.close()
                 raise ValueError("此转发目录已经绑定其他账号或会话")
         with self.db:
+            prepare_queue(self.db)
             for key, value in (("owner", owner), ("thread", thread_id)):
                 self.db.execute("INSERT OR IGNORE INTO meta VALUES (?,?)", (key, value))
             self.db.execute("INSERT OR IGNORE INTO meta VALUES ('since',?)", (str(since or time.time()),))
+            if float(self.get("send_paused_until", "0")) > 0:
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','1')")
             interrupted = self.db.execute("SELECT id FROM inbox WHERE status='sending'").fetchall()
             self.db.execute("UPDATE inbox SET status='uncertain' WHERE status='sending'")
             for row in interrupted:
@@ -50,9 +55,9 @@ class RelayStore:
         with self.lock, self.db:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
 
-    def enqueue(self, identity, text):
+    def enqueue(self, identity, text, category=None):
         """Caller may include this in the same transaction as consuming an inbox message."""
-        self.db.execute("INSERT OR IGNORE INTO outbox(id,text) VALUES (?,?)", (identity, clean_text(text, 3200)))
+        enqueue_notice(self.db, identity, clean_text(text, 3200), category)
 
     def ingest(self, batch):
         if not isinstance(batch.get("msgs", []), list):
@@ -65,7 +70,8 @@ class RelayStore:
                 identity, context, stamp = msg.get("message_id"), msg.get("context_token"), msg.get("create_time_ms")
                 if (not isinstance(identity, (str, int)) or isinstance(identity, bool) or not identity
                         or not isinstance(context, str) or not context or len(context) > 16384
-                        or not isinstance(stamp, (int, float)) or stamp / 1000 < float(self.get("since"))):
+                        or not isinstance(stamp, (int, float)) or isinstance(stamp, bool)
+                        or not math.isfinite(stamp) or stamp / 1000 < float(self.get("since"))):
                     continue
                 items = msg.get("item_list", [])
                 if not isinstance(items, list):
@@ -79,6 +85,7 @@ class RelayStore:
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context',?)", (context,))
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context_at',?)", (str(time.time()),))
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_paused_until','0')")
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','0')")
                 # Fresh owner input makes pending notifications immediately eligible again.
                 self.db.execute("UPDATE outbox SET due=0 WHERE delivered=0")
                 status = "queued"
@@ -92,7 +99,7 @@ class RelayStore:
                 if error:
                     status = "rejected"
                 self.db.execute("INSERT INTO inbox(id,text,status,created) VALUES (?,?,?,?)",
-                                (identity, text[:8000], status, time.time()))
+                                (identity, text[:8000], status, stamp / 1000))
                 if error:
                     self.enqueue("reject:" + identity, error)
             if isinstance(batch.get("get_updates_buf"), str):
@@ -111,9 +118,10 @@ class RelayStore:
 
     def outgoing(self):
         with self.lock:
-            if not self.get("context") or time.time() < float(self.get("send_paused_until", "0")):
+            if (not self.get("context") or self.get("send_requires_context") == "1"
+                    or time.time() < float(self.get("send_paused_until", "0"))):
                 return None
-            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND due<=? "
+            row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND superseded=0 AND due<=? "
                                   "ORDER BY CASE WHEN id LIKE 'local:%' THEN 0 WHEN id LIKE 'choice:%' THEN 1 "
                                   "WHEN id LIKE 'approval:%' OR id LIKE 'approval-result:%' THEN 1 "
                                   "WHEN id LIKE 'prompt:%' THEN 2 WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, rowid LIMIT 1", (time.time(),)).fetchone()
@@ -124,7 +132,7 @@ class RelayStore:
             if success:
                 self.db.execute("UPDATE outbox SET delivered=1 WHERE id=?", (identity,))
             else:
-                row = self.db.execute("SELECT attempts FROM outbox WHERE id=?", (identity,)).fetchone()
+                row = self.db.execute("SELECT attempts FROM outbox WHERE id=? AND superseded=0", (identity,)).fetchone()
                 if row:
                     delay = min(300, 30 * (2 ** min(row[0], 4)))
                     self.db.execute("UPDATE outbox SET attempts=attempts+1,due=? WHERE id=?",
@@ -133,4 +141,5 @@ class RelayStore:
     def summary(self):
         with self.lock:
             return {"tasks": dict(self.db.execute("SELECT status,count(*) FROM inbox GROUP BY status")),
-                    "unsent": self.db.execute("SELECT count(*) FROM outbox WHERE delivered=0").fetchone()[0]}
+                    "unsent": self.db.execute("SELECT count(*) FROM outbox WHERE delivered=0 AND superseded=0").fetchone()[0],
+                    "send_paused": self.get("send_requires_context") == "1"}

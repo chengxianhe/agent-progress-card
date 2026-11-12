@@ -6,6 +6,7 @@ import time
 from agent_progress_card.sanitize import clean_text
 from .files import read_json
 from agent_progress_card.choice import read_choice, read_choice_result
+from .selection_text import card_code
 
 
 def check_binding(directory, thread_id):
@@ -29,9 +30,9 @@ def snapshot(directory, thread_id):
 
 
 def choice_text(choice):
-    return clean_text("需要你选择：" + choice["question"] + "\n"
+    return clean_text("看板选项 " + card_code(choice) + "：" + choice["question"] + "\n"
             + "\n".join(f"{index}. {option}" for index, option in enumerate(choice["options"], 1))
-            + "\n回复数字 1-" + str(len(choice["options"])) + "，或直接发文字说明。", 1800)
+            + "\n回复示例：1 " + card_code(choice) + "（选第1项）；其他项替换开头数字。", 1800)
 
 
 def overview(state, feed):
@@ -100,7 +101,8 @@ def mirror(store, state, feed):
             if store.db.execute("SELECT 1 FROM outbox WHERE id=?", (key,)).fetchone():
                 continue
             label = "当前会话回复" if note["kind"] == "final" else "当前工作说明"
-            store.enqueue(key, label + "\n" + clean_text(note["text"], 1800))
+            store.enqueue(key, label + "\n" + clean_text(note["text"], 1800),
+                          "final" if note["kind"] == "final" else "progress")
             if note["kind"] == "commentary":
                 store.db.execute("INSERT OR REPLACE INTO meta VALUES ('last_progress',?)", (str(now),))
         # Manual task status is useful even when there is no new assistant note.

@@ -2,10 +2,13 @@
 import json
 import time
 import uuid
+import hashlib
 
 from .approval_prompt import METHOD, parse_reply, request_key, numbered_reply, label_reply
 from .approval_requests import describe, request_event, typed_answer, visible
 from .approval_forms import form_reply
+from .approval_reply_status import blocked_reply
+from .selection_text import literal_selection
 
 
 class ApprovalState:
@@ -95,6 +98,9 @@ class ApprovalState:
                 return
             count = self.store.db.execute("SELECT count(*) FROM remote_approvals WHERE state IN ('pending','queued','sending')").fetchone()[0]
             if count >= 20:
+                digest = hashlib.sha256((connection + key).encode()).hexdigest()[:16]
+                self.store.enqueue('notice:approval-limit:' + digest,
+                                   '系统待处理请求已达 20 项；新请求未在微信接管，没有提交决定。请先处理现有请求。')
                 return
             now, code = time.time(), 'A' + uuid.uuid4().hex[:10].upper()
             self.store.db.execute('INSERT INTO remote_approvals(code,connection,request_key,state,preview,created,expires,choices,method,form) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -106,10 +112,10 @@ class ApprovalState:
                 for i, chunk in enumerate(chunks, 1):
                     self.store.enqueue(f'approval:{code}:part:{i}', f'授权详情 {code}（{i}/{len(chunks)}）\n' + chunk)
                 details = f'完整内容见上方 {len(chunks)} 条详情；全部送达后才能选择。'
-            footer = f'回复「选项号 {code}」；仅一项待选时可只回数字。' if choices else ''
+            footer = f'回复示例：1 {code}（选第1项）；其他项替换开头数字。' if choices else ''
             if form:
                 footer += f'\n文字或多题填写：填写 {code} {{"字段或问题ID":"答案"}}'
-            notice = (f'待处理 {code} · 10 分钟内有效\n{details}\n\n{options}\n{footer}') if preview else (
+            notice = (f'系统请求 {code} · 10 分钟内有效\n{details}\n\n{options}\n{footer}') if preview else (
                 f'检测到未适配请求 {code}\n类型：{method}\n原因：{problem}\n没有提交任何决定；此通知不能回复数字授权。')
             self.store.enqueue('approval:' + code, notice)
 
@@ -124,6 +130,7 @@ class ApprovalState:
         parsed = parse_reply(message['text'])
         numbered = numbered_reply(message['text'])
         labeled = label_reply(message['text'])
+        literal = None if parsed else literal_selection(message['text'])
         try:
             filled = form_reply(message['text'])
         except ValueError as error:
@@ -135,14 +142,14 @@ class ApprovalState:
                 reply = '待审批编号：' + '、'.join(r['code'] for r in rows) if rows else '当前没有可在微信处理的审批；电脑弹窗可能需要原客户端确认。'
                 for row in rows:
                     self.store.db.execute('UPDATE outbox SET delivered=0,due=0 WHERE id=? OR id LIKE ?', ('approval:' + row['code'], 'approval:' + row['code'] + ':part:%'))
-            elif parsed is None and numbered is None and filled is None and labeled is None:
-                reply = '请按通知回复「选项号 A编号」或「批准 A编号」；不会把这条消息当作新任务。'
+            elif parsed is None and numbered is None and filled is None and labeled is None and literal is None:
+                reply = '请回复“数字 A编号”，例如“1 A0123456789”（以通知实际编号为准）；没有提交决定，也不会作为新任务。'
             else:
                 if filled:
                     code, _ = filled
                     decision = None
-                elif numbered or labeled:
-                    index, code = numbered or labeled
+                elif numbered or labeled or literal:
+                    index, code = numbered or labeled or literal
                     if code is None:
                         candidates = self.store.db.execute("SELECT code FROM remote_approvals WHERE state='pending'").fetchall()
                         code = candidates[0]['code'] if len(candidates) == 1 else ''
@@ -152,11 +159,10 @@ class ApprovalState:
                 row = self.store.db.execute('SELECT * FROM remote_approvals WHERE code=?', (code,)).fetchone()
                 sent = self.store.db.execute('SELECT delivered FROM outbox WHERE id=?', ('approval:' + code,)).fetchone()
                 missing_parts = self.store.db.execute("SELECT 1 FROM outbox WHERE id LIKE ? AND delivered=0 LIMIT 1", ('approval:' + code + ':part:%',)).fetchone()
-                if missing_parts:
-                    reply = '完整详情还未全部送达，请等待收到最后的编号选项再回复；没有提交授权。'
-                elif (not row or row['state'] != 'pending' or message.get('created', 0) < row['created']
-                        or ((numbered or labeled) and (numbered or labeled)[1] is None and (not sent or not sent[0]))):
-                    reply = '这个审批编号不可用、已经处理或已过期；没有再次提交。请发送“审批”查看。'
+                problem = blocked_reply(row, message, sent, missing_parts,
+                                        bool((numbered or labeled) and (numbered or labeled)[1] is None))
+                if problem:
+                    reply = problem
                 else:
                     choices = json.loads(row['choices'])
                     response = None
@@ -167,6 +173,20 @@ class ApprovalState:
                             response = typed_answer(json.loads(row['form']), filled[1])
                         except (ValueError, KeyError, TypeError) as problem:
                             error = str(problem)
+                    elif literal and not numbered:
+                        exact = [item for item in choices if item['label'].strip().casefold() == literal[0].casefold()]
+                        item = exact[0] if len(exact) == 1 else {}
+                        if not item and labeled:
+                            for candidate in choices:
+                                payload = candidate.get('response') or {}
+                                matches = candidate.get('decision') == labeled[0] or payload.get('decision') == labeled[0]
+                                matches = matches or (payload.get('action') == labeled[0] and not payload.get('content'))
+                                if row['method'] == 'item/tool/requestUserInput':
+                                    matches = candidate['label'].strip().lower() in (('allow', 'accept', '允许') if labeled[0] == 'accept' else ('cancel', '取消'))
+                                if matches:
+                                    exact.append(candidate)
+                            item = exact[0] if len(exact) == 1 else {}
+                        decision, response = item.get('decision'), item.get('response')
                     elif labeled:
                         candidates = []
                         for item in choices:
@@ -196,9 +216,11 @@ class ApprovalState:
 
             self.store.mark(message['id'], 'local', reply=reply)
 
-    def has_recent_prompt(self):
+    def has_recent_prompt(self, pending_only=False):
         self.expire()
         with self.store.lock:
+            if pending_only:
+                return bool(self.store.db.execute("SELECT 1 FROM remote_approvals WHERE state IN ('pending','queued','sending') LIMIT 1").fetchone())
             return bool(self.store.db.execute("SELECT 1 FROM remote_approvals WHERE state!='native' AND created>=? LIMIT 1", (time.time() - 600,)).fetchone())
 
     def claim(self, connection):

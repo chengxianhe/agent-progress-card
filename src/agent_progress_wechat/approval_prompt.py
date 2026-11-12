@@ -5,6 +5,7 @@ import re
 import unicodedata
 
 from agent_progress_card.sanitize import clean_text, PROTECTED
+from .selection_text import numbered_selection, literal_selection, approval_syntax
 
 METHOD = 'item/commandExecution/requestApproval'
 
@@ -51,6 +52,8 @@ def display(params):
 
 def ordered_choices(params):
     offered = params.get('availableDecisions')
+    if offered is None:
+        offered = ['accept', 'decline', 'cancel']
     if not isinstance(offered, list) or len(offered) > 8:
         return []
     labels = {'accept': '仅此次允许', 'decline': '拒绝本次命令，任务可继续',
@@ -69,24 +72,26 @@ def ordered_choices(params):
 
 
 def numbered_reply(text):
-    match = re.fullmatch(r'([1-8])(?:\s+(A[0-9A-Fa-f]{10}))?', text.strip())
-    return (int(match[1]), match[2].upper() if match[2] else None) if match else None
+    return numbered_selection(text)
 
 
 def parse_reply(text):
-    match = re.fullmatch(r'(批准|拒绝)\s+(A[0-9A-Fa-f]{10})', text.strip())
+    match = re.fullmatch(r'(批准|拒绝)\s+(A[0-9A-Fa-f]{10})', text.strip(), re.I)
     if not match:
         return None
     return match[2].upper(), 'accept' if match[1] == '批准' else 'decline'
 
 
 def label_reply(text):
-    match = re.fullmatch(r'(allow|accept|允许|cancel|取消)(?:\s+(A[0-9A-Fa-f]{10}))?', text.strip(), re.I)
+    literal = literal_selection(text)
+    label, code = literal if literal else (text.strip(), None)
+    match = re.fullmatch(r'(allow|accept|允许|仅此次允许|cancel|取消)', label, re.I)
     if not match:
         return None
-    action = 'accept' if match[1].lower() in ('allow', 'accept', '允许') else 'cancel'
-    return action, match[2].upper() if match[2] else None
+    action = 'accept' if match[1].lower() in ('allow', 'accept', '允许', '仅此次允许') else 'cancel'
+    return action, code
 
 
 def is_approval_text(text):
-    return bool(label_reply(text)) or text in ('审批', '/approvals') or text.startswith(('批准', '拒绝', '填写')) or bool(re.fullmatch(r'\d+\s+A[0-9A-Fa-f]{10}', text.strip()))
+    return (bool(label_reply(text)) or bool(literal_selection(text)) or approval_syntax(text)
+            or text in ('审批', '/approvals') or text.startswith(('批准', '拒绝', '填写')))

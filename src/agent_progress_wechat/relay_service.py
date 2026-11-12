@@ -15,6 +15,7 @@ from .notification_delivery import send_outgoing
 from .approval_prompt import is_approval_text, numbered_reply, label_reply
 from .approval_service import run_approvals
 from .approval_state import ApprovalState
+from .selection_text import numbered_selection, card_code, approval_syntax
 
 
 def selected_message(text, choice):
@@ -51,11 +52,40 @@ def seed_previous_connection(store, directory, owner):
 def deliver(store, session, message, directory, approvals=None):
     """Only mark sending immediately before the mutating RPC; uncertainty is terminal."""
     check_binding(directory, session.thread_id)
+    ordinary = numbered_selection(message["text"], "C", bare=False)
+    if ordinary:
+        with choice_lock(directory):
+            choice = read_choice(directory, session.thread_id)
+            index, code = ordinary
+            result = read_choice_result(directory, session.thread_id)
+            if (not choice or card_code(choice) != code or not 1 <= index <= len(choice["options"])
+                    or message.get("created", 0) < choice["created_at"]):
+                store.mark(message["id"], "local", reply="这个看板 C 编号已结束或不匹配；没有回答系统请求，也没有作为新任务发送。")
+                return
+            if result and result["choice_id"] == choice["id"] and result["status"] == "uncertain":
+                store.mark(message["id"], "local", reply="这项看板选择的上次投递回执不确定，不会重发。")
+                return
+            return deliver_text(store, session, {**message, "text": str(index)}, directory, choice)
+    if approval_syntax(message["text"], "C"):
+        store.mark(message["id"], "local", reply="看板回复格式或选项无效，请按通知示例回复“数字 C编号”；没有作为新任务发送。")
+        return
     selected = numbered_reply(message["text"]) or label_reply(message["text"])
+    if (selected is None and message["text"].isdigit() and len(message["text"]) <= 2
+            and approvals is not None and approvals.has_recent_prompt(pending_only=True)):
+        store.mark(message["id"], "local", reply="这个数字不在系统请求的可选范围内；请按最新通知回复，没有作为新任务发送。")
+        return
     if approvals is not None and selected and approvals.has_recent_prompt():
         with choice_lock(directory):
-            if selected[1] is None and read_choice(directory, session.thread_id):
-                store.mark(message["id"], "local", reply="同时有普通选项和原生请求，请回复「选项号 A审批编号」处理审批；普通选项请在小看板点击。")
+            choice = read_choice(directory, session.thread_id)
+            if selected[1] is None and choice and approvals.has_recent_prompt(pending_only=True):
+                store.mark(message["id"], "local", reply="同时有看板选项和系统请求。看板回复“数字 " + card_code(choice)
+                           + "”；系统请求请复制 A 编号通知里的完整回复示例，不能只回数字。")
+            elif selected[1] is None and choice and numbered_reply(message["text"]):
+                result = read_choice_result(directory, session.thread_id)
+                if result and result["choice_id"] == choice["id"] and result["status"] == "uncertain":
+                    store.mark(message["id"], "local", reply="这项看板选择的上次投递回执不确定，不会重发。")
+                    return
+                return deliver_text(store, session, {**message, "text": str(selected[0])}, directory, choice)
             else:
                 approvals.handle(message)
         return
@@ -114,6 +144,13 @@ def deliver(store, session, message, directory, approvals=None):
 def deliver_text(store, session, message, directory, choice=None):
     text = selected_message(message["text"], choice)
     chosen_index = int(message["text"]) if choice and text != message["text"] else None
+    if choice and message["text"].isdigit():
+        if not 1 <= int(message["text"]) <= len(choice["options"]):
+            store.mark(message["id"], "local", reply="这个数字不在当前看板选项范围内，没有作为新任务发送。")
+            return
+        if message.get("created", 0) < choice["created_at"]:
+            store.mark(message["id"], "local", reply="这条回复早于当前看板问题，没有选择新问题；请核对最新 C 编号。")
+            return
     connection = session.open()
     try:
         method, params = session.prepare(connection, text, message["id"])
@@ -159,8 +196,10 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
     def publish():
         with health_lock:
             problems = [p for p in health.values() if p]
-        if store.summary()["unsent"] and time.time() < float(store.get("send_paused_until", "0")):
-            problems.append("后台仍在运行；微信暂时拒收回复，5 分钟内重试；可发“进度”刷新回信")
+        if store.get("send_requires_context") == "1":
+            problems.append("微信推送已暂停；发一条新消息恢复，只保留最新普通进度和结果，审批单独保留")
+        elif store.summary()["unsent"] and time.time() < float(store.get("send_paused_until", "0")):
+            problems.append("微信推送暂时退避；发“进度”刷新回信")
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
                   "status": "retrying" if problems else "connected", "message": "；".join(problems) if problems else
                   ("已连接当前会话；手机授权和表单回复已启用，发送“审批”查看。" if approvals else
@@ -176,6 +215,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                 health_update("wechat")
                 stop.wait(.5)
             except LinkError as error:
+                store.put("send_requires_context", "1")
                 health_update("wechat", str(error))
                 if error.expired:
                     auth_expired.set()
@@ -193,9 +233,9 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                 stop.wait(1)
             except LinkError as error:
                 if error.stale_context:
-                    health_update("send", "微信暂时拒收回复（-2）；通知已保留，后台仍在接收消息和重试")
+                    health_update("send", "微信暂时拒收回复（-2）；推送暂停，后台仍在接收新消息")
                 else:
-                    health_update("send", str(error) + "，回复保留并退避重试")
+                    health_update("send", str(error) + "，推送暂停，等待新消息恢复")
                 if error.expired:
                     auth_expired.set()
                     stop.set()

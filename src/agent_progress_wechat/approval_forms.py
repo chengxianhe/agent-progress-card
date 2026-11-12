@@ -97,7 +97,7 @@ def native_answers(questions, content):
 
 
 def form_reply(text):
-    match = re.fullmatch(r'填写\s+(A[0-9A-Fa-f]{10})\s+(.+)', text.strip(), re.S)
+    match = re.fullmatch(r'填写\s+(A[0-9A-Fa-f]{10})\s+(.+)', text.strip(), re.S | re.I)
     if not match:
         return None
     try:

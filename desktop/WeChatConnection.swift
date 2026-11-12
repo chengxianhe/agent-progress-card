@@ -9,6 +9,7 @@ struct WeChatConnectionState: Decodable {
     let thread_id: String?
     let qr: String?
     let unsent: Int?
+    let send_paused: Bool?
 
     static func read(_ url: URL) throws -> Self {
         let file = try FileHandle(forReadingFrom: url)
@@ -33,12 +34,13 @@ final class WeChatConnectionModel: ObservableObject {
     private let binding = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/AgentProgressCard/wechat-source.json")
 
-    var connected: Bool { state?.status == "connected" && issue.isEmpty }
+    var connected: Bool { state?.status == "connected" && state?.send_paused != true && issue.isEmpty }
     var label: String {
         if connected { return "微信已连接" }
         if !issue.isEmpty { return "微信连接待检查" }
         if state?.status == "expired" { return "微信登录已失效" }
         if state?.status == "stopped" { return "微信同步已停止" }
+        if state?.send_paused == true { return "微信推送已暂停 · 等待新消息" }
         if state?.status == "retrying" {
             if let pending = state?.unsent, pending > 0 { return "微信有 \(pending) 条待送达 · 查看原因" }
             return "微信同步待处理 · 查看原因"

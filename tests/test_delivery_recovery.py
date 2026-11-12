@@ -96,13 +96,17 @@ class NotificationTransportTests(unittest.TestCase):
             self.assertEqual(1, store.summary()['unsent'])
             self.assertFalse(send_outgoing(store, Client()))
             with store.lock, store.db: store.db.execute('UPDATE outbox SET due=0')
+            self.assertFalse(send_outgoing(store, Client()))
+            store.ingest({'msgs': [{'from_user_id': 'owner', 'message_type': 1,
+                'message_id': 'fresh', 'context_token': 'new-context', 'create_time_ms': time.time()*1000,
+                'item_list': [{'type': 1, 'text_item': {'text': '进度'}}]}]})
             self.assertTrue(send_outgoing(store, Client()))
             self.assertEqual(calls[0], calls[1])
             self.assertEqual(0, store.summary()['unsent'])
 
 
 class SendPauseRecoveryTests(unittest.TestCase):
-    def test_rejection_pauses_all_notifications_then_probes_without_user_input(self):
+    def test_rejection_waits_for_new_input_instead_of_probing_old_context(self):
         from unittest.mock import patch
         from agent_progress_wechat.notification_delivery import send_outgoing
         from agent_progress_wechat.ilink import LinkError
@@ -118,4 +122,8 @@ class SendPauseRecoveryTests(unittest.TestCase):
             self.assertIsNone(store.outgoing())
             future = time.time() + 301
             with patch('time.time', return_value=future):
-                self.assertIsNotNone(store.outgoing())
+                self.assertIsNone(store.outgoing())
+            store.ingest({'msgs': [{'from_user_id': 'owner', 'message_type': 1,
+                'message_id': 'fresh', 'context_token': 'new-context', 'create_time_ms': time.time()*1000,
+                'item_list': [{'type': 1, 'text_item': {'text': '进度'}}]}]})
+            self.assertEqual(store.outgoing()['id'], 'note:new')

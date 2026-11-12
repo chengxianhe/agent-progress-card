@@ -1,6 +1,5 @@
 """Retry notifications independently of task delivery; preserve context refresh races."""
 import hashlib
-import time
 
 from .ilink import LinkError
 
@@ -15,14 +14,12 @@ def send_outgoing(store, client):
     try:
         client.send(item['text'], context, wire_id)
     except LinkError as error:
-        if error.stale_context:
-            with store.lock:
-                # An old in-flight send must not invalidate newly received reply context.
-                if (store.get('context'), store.get('context_at')) == (context, context_at):
-                    store.put('send_paused_until', time.time() + 300)
+        with store.lock:
+            # An old in-flight failure must not pause a newly received reply context.
+            if (store.get('context'), store.get('context_at')) == (context, context_at):
+                with store.db:
+                    store.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','1')")
                     store.sent(item['id'], False)
-        else:
-            store.sent(item['id'], False)
         raise
     store.sent(item['id'], True)
     return True
