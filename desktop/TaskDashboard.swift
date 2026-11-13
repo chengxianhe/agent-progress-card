@@ -53,13 +53,15 @@ struct TaskDashboard: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
-                           let question = activity.feed?.latest_question {
+                           let question = activity.feed?.latest_question,
+                           question.id != "native:" + (activity.feed?.choice?.source_question_id ?? "") {
                             NativeQuestionView(question: question)
                         }
                         if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
                            let choice = activity.feed?.choice, choice.isValid {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text("需要你选择：" + choice.question).font(.callout.weight(.semibold))
+                                if choice.options.isEmpty && choice.fields != nil { ChoiceFormView(choice: choice) }
                                 ForEach(Array(choice.options.enumerated()), id: \.offset) { index, option in
                                     Button("\(index + 1). \(option)") {
                                         do {

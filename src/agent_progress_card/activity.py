@@ -36,6 +36,7 @@ class ActivityReader:
         self.notes = OrderedDict()
         self.latest_reply = None
         self.latest_question = None
+        self.chat_prompt = None
         self.question_notices = OrderedDict()
         self.replay_before = replay_before
         self.last_event_at = 0.0
@@ -53,6 +54,11 @@ class ActivityReader:
         if not isinstance(payload, dict):
             return
         kind = payload.get("type")
+        if ((record.get('type') == 'event_msg' and kind == 'user_message')
+                or (record.get('type') == 'response_item' and kind == 'message' and payload.get('role') == 'user')):
+            self.chat_prompt = None
+            if self.latest_question and at >= self.latest_question['time']:
+                self.latest_question['inactive'] = True
         if record.get("type") == "event_msg" and kind == "token_count":
             usage = (payload.get("info") or {}).get("total_token_usage") or {}
             count = usage.get("output_tokens")
@@ -75,13 +81,19 @@ class ActivityReader:
                     self.pending.popitem(last=False)
                 question = native_question(payload, at, self.replay_before)
                 if question:
+                    from .question_choice import parse
+                    self.chat_prompt = parse(payload, at, self.replay_before)
                     self.latest_question = question
                     self.question_notices[question["id"]] = question
                     while len(self.question_notices) > 8:
                         self.question_notices.popitem(last=False)
                 self.turn_active = True
             elif kind in {"function_call_output", "custom_tool_call_output"}:
-                self.pending.pop(call_id, None)
+                pending = self.pending.pop(call_id, None)
+                if pending and self.latest_question and self.latest_question['id'] == 'native:' + str(call_id):
+                    from .question_choice import ASYNC
+                    if pending['name'] not in ASYNC:
+                        self.latest_question['inactive'] = True
             else:
                 return
             self.last_event_at = at
@@ -177,4 +189,5 @@ class ActivityReader:
                 "output_rate": self.output_rate,
                 "notes": list(self.notes.values()), "latest_reply": self.latest_reply,
                 "latest_question": self.latest_question, "question_notices": list(self.question_notices.values()),
+                "chat_prompt": self.chat_prompt,
                 "pending": list(self.pending.values()), "calls": list(self.calls.values())}

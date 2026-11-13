@@ -27,6 +27,7 @@ class ApprovalTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name)
         self.store = RelayStore(self.path, 'owner', 'thread', since=1)
+        self.store.put('context', 'synthetic-online')
         self.state = ApprovalState(self.store, 'thread')
         save_json(self.path / 'activity-source.json', {'thread_id': 'thread'})
 
@@ -74,7 +75,7 @@ class ApprovalTests(unittest.TestCase):
         self.assertIsNone(self.state.claim('conn'))
         self.resolve()
         self.assertEqual(self.rows()[0]['state'], 'resolved')
-        self.assertEqual(self.store.db.execute("SELECT delivered FROM outbox WHERE id=?", ('approval:' + code,)).fetchone()[0], 1)
+        self.assertEqual(tuple(self.store.db.execute("SELECT delivered,superseded FROM outbox WHERE id=?", ('approval:' + code,)).fetchone()), (0, 1))
 
     def test_decline_and_no_session_or_persistent_grants(self):
         self.state.event(approval('abc'), 'conn')
@@ -146,7 +147,7 @@ class ApprovalTests(unittest.TestCase):
     def test_sensitive_or_partial_permission_prompts_stay_native(self):
         variants = [dict(command='echo token=secret'), dict(command='x'*60001), dict(command='cat ~/.env'),
                     dict(networkApprovalContext={'host': 'test'}), dict(additionalPermissions={'network': True}),
-                    dict(kind='writeStdin'), dict(command=None), dict(availableDecisions=['accept']), dict(cwd=None)]
+                    dict(kind='futureUnknownKind'), dict(command=None), dict(availableDecisions=['accept']), dict(cwd=None)]
         for idx, values in enumerate(variants):
             self.state.event(approval(idx, **values), 'conn')
         self.assertTrue(all(r['state'] == 'native' for r in self.rows()))
@@ -164,7 +165,7 @@ class ApprovalTests(unittest.TestCase):
             (dict(additionalPermissions={'network': True}), '额外权限'),
             (dict(command=None), '缺少完整'),
             (dict(command='echo \x1b[31m'), '控制字符'),
-            (dict(kind='writeStdin'), '这类操作'),
+            (dict(kind='futureUnknownKind'), '这类操作'),
             (dict(availableDecisions=['accept']), '审批选项'),
         ]
         for identity, (changes, expected) in enumerate(variants):

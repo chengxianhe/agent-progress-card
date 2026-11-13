@@ -19,32 +19,42 @@ def choice_lock(directory):
 def read_choice(directory, thread_id):
     try:
         with (directory / "choice.json").open("rb") as stream:
-            raw = stream.read(4097)
-        if len(raw) > 4096:
+            raw = stream.read(32769)
+        if len(raw) > 32768:
             return None
         value = json.loads(raw)
         if (value.get("thread_id") != thread_id or not isinstance(value.get("id"), str)
                 or len(value["id"]) > 64 or not isinstance(value.get("created_at"), (int, float))
                 or not 0 <= time.time() - value["created_at"] <= 86400
                 or not isinstance(value.get("question"), str) or len(value["question"]) > 300
-                or not isinstance(value.get("options"), list) or not 2 <= len(value["options"]) <= 5
+                or not isinstance(value.get("options"), list)
+                or (not 2 <= len(value["options"]) <= 5 and not value.get('fields'))
                 or any(not isinstance(x, str) or not x or len(x) > 180 for x in value["options"])):
             return None
+        if value.get('fields'):
+            from .question_choice import valid_fields
+            if not valid_fields(value['fields']) or len(value['options']) > 5:
+                return None
         return value
     except (OSError, ValueError, TypeError, KeyError):
         return None
 
 
-def create_choice(directory, question, options):
+def create_choice(directory, question, options, fields=None, source_question_id=None):
     from .watcher import atomic_json
     config = json.loads((directory / "activity-source.json").read_text())
     thread_id = config["thread_id"]
     if not isinstance(thread_id, str) or not thread_id or not isinstance(question, str) or not question.strip():
         raise ValueError("缺少已绑定会话或问题")
-    if len(question) > 300 or not 2 <= len(options) <= 5 or any(not x or len(x) > 180 for x in options):
+    from .question_choice import valid_fields
+    if (len(question) > 300 or (not fields and not 2 <= len(options) <= 5)
+            or (fields is not None and not valid_fields(fields))
+            or any(not x or len(x) > 180 for x in options)):
         raise ValueError("问题或选项长度不合法")
     value = {"id": uuid.uuid4().hex, "thread_id": thread_id, "created_at": time.time(),
              "question": question, "options": options}
+    if fields is not None:
+        value.update(fields=fields, source_question_id=source_question_id)
     with choice_lock(directory):
         if read_choice(directory, thread_id):
             raise ValueError("已有待选问题；请先收到答复或清除旧问题")
@@ -62,7 +72,9 @@ def complete_choice_unlocked(directory, thread_id, identity, index, source):
     from .watcher import atomic_json
     directory = Path(directory)
     choice = read_choice(directory, thread_id)
-    if not choice or choice["id"] != identity or not 1 <= index <= len(choice["options"]):
+    if (not choice or choice["id"] != identity
+            or (index is None and not choice.get('fields'))
+            or (index is not None and not 1 <= index <= len(choice["options"]))):
         return False
     atomic_json(directory / "choice-result.json", {"choice_id": identity, "thread_id": thread_id,
                 "status": "sent", "index": index, "created_at": time.time(),

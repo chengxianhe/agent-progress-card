@@ -136,12 +136,15 @@ class RelayTests(unittest.TestCase):
             deliver(self.store, session, self.store.next_message(), self.root)
         self.assertEqual(self.store.summary()["tasks"], {"queued": 1})
 
-    def test_restart_marks_inflight_uncertain_and_keeps_reply(self):
+    def test_restart_marks_inflight_uncertain_and_reports_only_in_recovery_summary(self):
         self.ingest()
         self.store.mark("1", "sending")
         self.store.db.close()
         self.store = RelayStore(self.root, "owner", "thread-1")
         self.assertEqual(self.store.summary()["tasks"], {"uncertain": 1})
+        self.assertIsNone(self.store.outgoing())
+        self.ingest("2", "进度")
+        mirror(self.store, {}, {})
         self.assertIn("不会自动重发", self.store.outgoing()["text"])
 
     def test_card_binding_switch_blocks_dispatch(self):
@@ -211,7 +214,7 @@ class RelayTests(unittest.TestCase):
                                    "text_item": {"text": "选项"}}]}]})
         deliver(self.store, CurrentSession("unused", "thread-1"), self.store.next_message(), self.root)
         self.assertEqual(self.store.summary()["tasks"], {"local": 1})
-        self.assertEqual(self.store.outgoing()["id"], "local:choice-request")
+        self.assertTrue(self.store.outgoing()["id"].startswith("choice:"))
         self.assertIn("2. 乙", self.store.outgoing()["text"])
         self.assertEqual(read_choice(self.root, "thread-1")["id"], choice["id"])
 

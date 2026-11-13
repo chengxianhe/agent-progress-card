@@ -116,6 +116,7 @@ struct CardView: View {
             }
             if let choice = feed.choice, choice.isValid,
                !(feed.choice_result?.choice_id == choice.id && feed.choice_result?.status != "retry") {
+                if let source = choice.source_question_id { promptedQuestionID = "native:" + source }
                 if promptedChoiceID != choice.id {
                     promptedChoiceID = choice.id
                     presentedPrompt = .choice(choice)
@@ -123,7 +124,7 @@ struct CardView: View {
                 return
             }
             if case .choice = presentedPrompt { presentedPrompt = nil }
-            if let question = feed.latest_question, question.isValid, !question.replayed,
+            if let question = feed.latest_question, question.isValid, !question.replayed, question.inactive != true,
                promptedQuestionID != question.id,
                Date().timeIntervalSince1970 - question.time < 86400 {
                 promptedQuestionID = question.id

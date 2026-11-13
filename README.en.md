@@ -15,8 +15,10 @@ Codex. It does not expose hidden reasoning or read unrelated conversations, pers
 - Current/history selection, task categories and tool/failure filters.
 - Redacted, bounded tool details and public work notes; latest completion reply.
 - Average output tokens per second for the current turn, including tool wait time.
-- Explicit numbered card choices, separate read-only native question notices, and optional command approvals.
-- Owner-only WeChat pairing, paused outbound delivery, coalesced ordinary updates and recovery status.
+- Card choices and new ordinary asynchronous questions use C codes; multiple questions and text answers are supported.
+- Owner-only WeChat pairing; disconnection drops all pending notifications and recovery sends one current summary.
+- Opt-in formal approvals and forms use A codes; active requests can be queried without replaying old notices.
+- Local diagnostics distinguish WeChat transport, task, approvals, collection and supervision health.
 - Optional per-user background supervision that restarts failed relays and respects manual stops.
 
 ## Build and install
@@ -77,7 +79,9 @@ Pair in the card's connection settings. Your account must support iLink/ClawBot;
 on the service. Only the pairing owner is accepted. See [WeChat details](docs/wechat.md).
 
 Ordinary text enters the same Codex conversation and incurs normal model usage. Local commands
-`进度` (progress), `结果` (result), `帮助` (help), `选项` (choices) and `审批` (approvals) query local state.
+`诊断` / `出门检查` (diagnostics / preflight), `进度` (progress), `结果` (result), `帮助` (help),
+`选项` (choices) and `审批` (approvals) query local state. `审批 2` requests page 2;
+`审批 A_CODE` requests one active request's complete details.
 Polling and local state queries do not call the model. Use the card's stop button to pause synchronization.
 
 ### Three different kinds of choices
@@ -98,6 +102,9 @@ PYTHONPATH=src python3 -m agent_progress_card choice \
 Acknowledged delivery clears the choice. Ambiguous delivery is not automatically resubmitted.
 If the user answers directly in chat or cancels, call
 `PYTHONPATH=src python3 -m agent_progress_card clear-choice`. Choices expire after 24 hours.
+The collector can also create C-coded choices for new ordinary asynchronous questions.
+Text and multiple-question replies use the displayed `填写 C_CODE JSON` format and enter the conversation
+as owner chat. A native form requires a formal A-coded request to submit its protocol response.
 
 ### Phone approvals and forms
 
@@ -130,24 +137,25 @@ It avoids duplicate pollers and respects manual stop requests. See [setup and re
 Supervision cannot remove WeChat's upstream delivery restrictions. `-2 / prepare failed` may mean that
 outbound replies are temporarily rejected while the local process still receives messages; it does not by
 itself establish login expiry. Current-session mode pauses outbound delivery until a fresh owner message,
-rather than periodically probing the rejected context. Pending ordinary progress, final replies and successful
-input receipts each retain only the latest item; approvals, prompts and uncertain-delivery warnings are protected.
-Send `进度` or `选项` to resume delivery; re-pair only when login is reported as expired.
+rather than periodically probing the rejected context. All pending notification categories are discarded after disconnection, including prompts, approvals,
+receipts and warnings. Restart requires fresh owner input. Resume produces one current summary;
+request still-active details with `审批 Acode` or the current ordinary form with `选项`.
 Server acceptance does not prove the phone displayed a message. Sleep, network loss and a closed Codex
 conversation also affect operation.
 
-## Known limitations and pending fixes
+## Recovery coverage
 
-Isolated probes confirmed these unresolved cases; the 171 passing regression tests do not cover them:
+Current source changes address control-message capacity and scheduling, total frame deadlines,
+fair approval processing, all-category offline suppression and explicit request queries.
+Owner queries remain available when the task backend is temporarily unavailable; closed conversations
+are not reopened. An explicit approvals query may renew an expired code only while the same connection
+still knows the request is pending. Old codes and uncertain submissions are never replayed.
 
-- A blocked ordinary message at the queue head can delay progress queries or approvals behind it.
-- A full outbound queue can also reject control messages.
-- Repeated partial-frame read timeouts lack a total deadline and may exceed the intended wait.
-- A continuously busy event stream can starve approval submission and expiry checks.
-
-Resident operation and fresh-message recovery do not guarantee phone control during these faults.
-Desktop diagnostics may be needed. This documentation update does not install an app, change
-credentials or claim these issues are fixed.
+The existing supervisor detects stalled workers in its own relay child and allows a wake-up grace period.
+Send `出门检查` before leaving to check current transport, task, approval, collector and supervisor evidence.
+An offline computer, expired login, OS permissions and unsupported forms still need a separate access path.
+See [coverage and limits](docs/recovery-and-mobile-requests.md) and [verification records](docs/verification.md);
+automatic source checks do not establish phone or window acceptance.
 
 ## Privacy, compatibility and verification
 
@@ -162,11 +170,13 @@ Local Codex integration is experimental, tested with CLI 0.167.0. Revalidate aft
 bash scripts/verify.sh
 ```
 
-Currently runs 171 Python tests, both native builds and seven native model suites on macOS.
+Current checks run 212 Python tests, build both native entry points and run eight native model suites.
 Tests use synthetic data and do not contact WeChat. Live messaging, mobile approvals and window interaction
 require separate validation. Logs stay in ignored `build/verification/`; see [verification scope](docs/verification.md).
 
-Live phone checks succeeded for one-time Allow in a four-option MCP prompt and a numbered reply to a 3,798-character command sent in two parts.
+Earlier phone checks succeeded for one-time Allow in a four-option MCP prompt and a numbered reply to a 3,798-character command sent in two parts.
+The recovery revision has local installation and desktop-choice display records, but the phone feedback
+reported no notification received. Its recovered phone path still needs acceptance.
 The 60,000-character boundary, exact reassembly and incomplete-delivery guard have automated coverage, not equivalent live WeChat validation.
 Formal forms, file changes and turn-scoped permission adapters still need their respective live phone checks. Transcript-only client forms cannot submit a native answer through WeChat.
 

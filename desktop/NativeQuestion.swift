@@ -6,6 +6,7 @@ struct NativeQuestion: Decodable, Identifiable {
     let text: String
     let kind: String
     let replayed: Bool
+    let inactive: Bool?
 
     var isValid: Bool {
         !id.isEmpty && id.count <= 200 && time.isFinite && time > 0 &&

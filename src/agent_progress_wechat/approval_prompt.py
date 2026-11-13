@@ -20,10 +20,23 @@ def request_key(identity):
 
 def rejection_reason(params):
     """Explain display limits without echoing potentially sensitive request values."""
-    if params.get('kind', 'command') not in ('command', 'humanCommand'):
+    if params.get('kind', 'command') not in ('command', 'humanCommand', 'writeStdin'):
         return '这类操作暂不支持微信审批'
-    if params.get('networkApprovalContext') or params.get('additionalPermissions'):
+    if params.get('additionalPermissions'):
         return '请求包含额外权限，需使用原生权限界面'
+    network = params.get('networkApprovalContext')
+    if network is not None:
+        if (not isinstance(network, dict) or set(network) != {'host', 'protocol'}
+                or not isinstance(network['host'], str) or not 1 <= len(network['host']) <= 253
+                or network['protocol'] not in ('http', 'https', 'socks5Tcp', 'socks5Udp')):
+            return '网络权限上下文不完整或尚未支持'
+        value = json.dumps(network, ensure_ascii=False)
+        if PROTECTED.search(value) or clean_text(value, 1000) != value:
+            return '网络权限上下文无法完整安全展示'
+    environment = params.get('environmentId')
+    if environment is not None and (not isinstance(environment, str) or len(environment) > 200
+                                    or clean_text(environment, 200) != environment):
+        return '执行环境无法完整安全展示'
     choices = params.get('availableDecisions')
     if choices is not None and (not isinstance(choices, list) or len(choices) > 8 or ('accept' not in choices or not any(x in choices for x in ('decline', 'cancel')))):
         return '服务端提供的审批选项暂不支持'
@@ -47,7 +60,14 @@ def display(params):
         return None
     values = (params['command'], params['cwd'], params.get('reason') or '执行此命令需要你的确认')
     command, cwd, reason = (clean_text(v, 64000) for v in values)
-    return f'命令：\n{command}\n目录：{cwd}\n原因：{reason}'
+    text = (f'终端输入（写入现有进程）：\n{command}' if params.get('kind') == 'writeStdin'
+            else f'命令：\n{command}')
+    text += f'\n目录：{cwd}\n原因：{reason}'
+    if params.get('environmentId'):
+        text += '\n执行环境：' + params['environmentId']
+    if params.get('networkApprovalContext'):
+        text += '\n本次网络目标：' + json.dumps(params['networkApprovalContext'], ensure_ascii=False)
+    return text
 
 
 def ordered_choices(params):
@@ -94,4 +114,4 @@ def label_reply(text):
 
 def is_approval_text(text):
     return (bool(label_reply(text)) or bool(literal_selection(text)) or approval_syntax(text)
-            or text in ('审批', '/approvals') or text.startswith(('批准', '拒绝', '填写')))
+            or text in ('审批', '/approvals') or text.startswith(('批准', '拒绝', '填写', '审批 ', '/approvals ')))

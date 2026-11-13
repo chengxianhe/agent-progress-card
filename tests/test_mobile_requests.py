@@ -34,6 +34,7 @@ class MobileRequestsTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name)
         self.store = RelayStore(self.path, 'owner', 'thread', since=1)
+        self.store.put('context', 'synthetic-online')
         self.state = ApprovalState(self.store, 'thread')
         save_json(self.path/'activity-source.json', {'thread_id': 'thread'})
 

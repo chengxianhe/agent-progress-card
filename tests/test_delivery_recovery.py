@@ -24,7 +24,9 @@ class DeliveryRecoveryTests(unittest.TestCase):
         self.store.put('send_paused_until', time.time() + 300)
         self.assertIsNone(self.store.outgoing())
         self.ingest()
-        self.assertEqual('note:reply', self.store.outgoing()['id'])
+        from agent_progress_wechat.relay_mirror import mirror
+        mirror(self.store, {}, {})
+        self.assertTrue(self.store.outgoing()['id'].startswith('recovery:'))
 
     def test_exhausted_legacy_notification_recovers_after_due_time(self):
         self.store.db.execute('UPDATE outbox SET attempts=5,due=0')
@@ -40,7 +42,7 @@ class DeliveryRecoveryTests(unittest.TestCase):
         self.assertLessEqual(row['due'], time.time() + 300)
         self.assertIsNone(self.store.outgoing())
         self.ingest()
-        self.assertIsNotNone(self.store.outgoing())
+        self.assertIsNone(self.store.outgoing())
 
     def test_delivered_and_uncertain_input_not_replayed_on_context_refresh(self):
         self.store.sent('note:reply', True)
@@ -77,7 +79,7 @@ class NotificationTransportTests(unittest.TestCase):
             self.assertEqual('2', store.get('context_at'))
             self.assertEqual(0, store.outgoing()['attempts'])
 
-    def test_transport_retry_reuses_identity_and_marks_only_success_delivered(self):
+    def test_transport_failure_drops_old_notice_and_only_sends_new_recovery_summary(self):
         from agent_progress_wechat.notification_delivery import send_outgoing
         from agent_progress_wechat.ilink import LinkError
         with tempfile.TemporaryDirectory() as d:
@@ -93,15 +95,17 @@ class NotificationTransportTests(unittest.TestCase):
                     if len(calls) == 1:
                         raise LinkError('offline')
             with self.assertRaises(LinkError): send_outgoing(store, Client())
-            self.assertEqual(1, store.summary()['unsent'])
+            self.assertEqual(0, store.summary()['unsent'])
             self.assertFalse(send_outgoing(store, Client()))
             with store.lock, store.db: store.db.execute('UPDATE outbox SET due=0')
             self.assertFalse(send_outgoing(store, Client()))
             store.ingest({'msgs': [{'from_user_id': 'owner', 'message_type': 1,
                 'message_id': 'fresh', 'context_token': 'new-context', 'create_time_ms': time.time()*1000,
                 'item_list': [{'type': 1, 'text_item': {'text': '进度'}}]}]})
+            from agent_progress_wechat.relay_mirror import mirror
+            mirror(store, {}, {})
             self.assertTrue(send_outgoing(store, Client()))
-            self.assertEqual(calls[0], calls[1])
+            self.assertNotEqual(calls[0], calls[1])
             self.assertEqual(0, store.summary()['unsent'])
 
 
@@ -126,4 +130,7 @@ class SendPauseRecoveryTests(unittest.TestCase):
             store.ingest({'msgs': [{'from_user_id': 'owner', 'message_type': 1,
                 'message_id': 'fresh', 'context_token': 'new-context', 'create_time_ms': time.time()*1000,
                 'item_list': [{'type': 1, 'text_item': {'text': '进度'}}]}]})
-            self.assertEqual(store.outgoing()['id'], 'note:new')
+            self.assertIsNone(store.outgoing())
+            from agent_progress_wechat.relay_mirror import mirror
+            mirror(store, {}, {})
+            self.assertTrue(store.outgoing()['id'].startswith('recovery:'))

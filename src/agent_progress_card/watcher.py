@@ -100,6 +100,8 @@ def main():
                     if tail.offset == previous:
                         break
             snapshot = tail.reader.snapshot(time.time())
+            from .question_choice import sync
+            sync(args.state_dir, snapshot.get('chat_prompt'), snapshot['thread_id'])
             snapshot["choice"] = read_choice(args.state_dir, snapshot["thread_id"])
             try:
                 with (args.state_dir / "choice-result.json").open("rb") as stream:

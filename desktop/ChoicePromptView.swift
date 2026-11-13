@@ -9,6 +9,7 @@ struct ChoicePromptView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("需要你选择", systemImage: "list.number").font(.headline)
             Text(choice.question).font(.callout)
+            if choice.options.isEmpty && choice.fields != nil { ChoiceFormView(choice: choice) }
             ForEach(Array(choice.options.enumerated()), id: \.offset) { index, option in
                 Button("\(index + 1). \(option)") {
                     do {

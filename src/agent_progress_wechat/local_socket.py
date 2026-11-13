@@ -33,13 +33,14 @@ class LocalSocket:
             if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
                 raise TransportError("控制通道必须是当前用户的本地 socket")
             self.socket.settimeout(timeout)
+            self._handshake_deadline = time.monotonic() + timeout
             self.socket.connect(str(path))
             key = base64.b64encode(os.urandom(16)).decode()
             self.socket.sendall(("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
                 "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key + "\r\n\r\n").encode())
             header = bytearray()
             while not header.endswith(b"\r\n\r\n"):
-                header.extend(self._exact(1))
+                header.extend(self._exact(1, self._handshake_deadline))
                 if len(header) > 16384:
                     raise TransportError("控制通道握手过大")
             lines = bytes(header).decode("ascii").split("\r\n")
@@ -59,9 +60,14 @@ class LocalSocket:
     def close(self):
         self.socket.close()
 
-    def _exact(self, count):
+    def _exact(self, count, deadline=None):
         data = bytearray()
         while len(data) < count:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TransportError('Codex 响应超时')
+                self.socket.settimeout(remaining)
             chunk = self.socket.recv(count - len(data))
             if not chunk:
                 raise TransportError("Codex 控制通道已断开")
@@ -85,19 +91,19 @@ class LocalSocket:
             if remaining <= 0:
                 raise TransportError("Codex 响应超时")
             self.socket.settimeout(remaining)
-            first, second = self._exact(2)
+            first, second = self._exact(2, deadline)
             opcode, final, size = first & 15, bool(first & 128), second & 127
             if first & 112 or second & 128:
                 raise TransportError("不支持的 WebSocket 帧")
             if size == 126:
-                size = struct.unpack("!H", self._exact(2))[0]
+                size = struct.unpack("!H", self._exact(2, deadline))[0]
             elif size == 127:
-                size = struct.unpack("!Q", self._exact(8))[0]
+                size = struct.unpack("!Q", self._exact(8, deadline))[0]
             if size > MAX_MESSAGE or total + size > MAX_MESSAGE:
                 raise TransportError("Codex 响应过大")
             if opcode >= 8 and (not final or size > 125):
                 raise TransportError("非法控制帧")
-            data = self._exact(size)
+            data = self._exact(size, deadline)
             if opcode == 8:
                 raise TransportError("Codex 控制通道已关闭")
             if opcode == 9:

@@ -47,13 +47,14 @@ class NativeQuestionTests(unittest.TestCase):
         reader = ActivityReader('thread', time.time()-10)
         for name in ('exec_command', 'tools.request_user_input_async', 'approval', 'request_permissions'):
             reader.consume(event(name=name))
+        self.assertIsNone(reader.snapshot(time.time())['latest_question'])
         for questions in ([{'title': 'x', 'options': [123]}], [{'title': 123}], []):
             reader.consume(event(questions=questions))
         malformed = event()
         malformed['payload']['arguments'] = 'invalid-json'
         reader.consume(malformed)
         reader.consume(event(at=1))
-        self.assertIsNone(reader.snapshot(time.time())['latest_question'])
+        self.assertIn('结构暂不支持', reader.snapshot(time.time())['latest_question']['text'])
 
     def test_latest_question_survives_tool_ack_and_note_window(self):
         reader = ActivityReader('thread', 0)

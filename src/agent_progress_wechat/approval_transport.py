@@ -66,6 +66,13 @@ class ApprovalConnection(LocalSocket):
             elif method == PERMISSIONS:
                 valid = (set(result) == {'permissions', 'scope'} and result['scope'] == 'turn'
                          and isinstance(result['permissions'], dict) and not set(result['permissions']) - {'network', 'fileSystem'})
+            elif method in ('execCommandApproval', 'applyPatchApproval'):
+                rejected = result.get('decision')
+                valid = set(result) == {'decision'} and (
+                    rejected in ('approved', 'abort') or
+                    (isinstance(rejected, dict) and set(rejected) == {'denied'}
+                     and isinstance(rejected['denied'], dict) and set(rejected['denied']) == {'rejection'}
+                     and isinstance(rejected['denied']['rejection'], str)))
             if not valid:
                 raise ValueError('Invalid typed response; no permission overrides')
         self._send(json.dumps({'id': identity, 'result': result}).encode())

@@ -2,6 +2,7 @@
 import hashlib
 
 from .ilink import LinkError
+from .delivery_policy import pause
 
 
 def send_outgoing(store, client):
@@ -10,7 +11,8 @@ def send_outgoing(store, client):
         if not item:
             return False
         context, context_at = store.get('context'), store.get('context_at')
-    wire_id = 'relay_' + hashlib.sha256(item['id'].encode()).hexdigest()[:32]
+    identity = item['id'] + (':' + str(item['revision']) if item['revision'] else '')
+    wire_id = 'relay_' + hashlib.sha256(identity.encode()).hexdigest()[:32]
     try:
         client.send(item['text'], context, wire_id)
     except LinkError as error:
@@ -18,8 +20,8 @@ def send_outgoing(store, client):
             # An old in-flight failure must not pause a newly received reply context.
             if (store.get('context'), store.get('context_at')) == (context, context_at):
                 with store.db:
-                    store.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','1')")
-                    store.sent(item['id'], False)
+                    store.sent(item['id'], False, item['revision'])
+                    pause(store.db)
         raise
-    store.sent(item['id'], True)
+    store.sent(item['id'], True, item['revision'])
     return True

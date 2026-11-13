@@ -6,20 +6,40 @@ struct CardChoice: Decodable, Identifiable {
     let created_at: Double
     let question: String
     let options: [String]
+    let fields: [ChatField]?
+    let source_question_id: String?
 
     var isValid: Bool {
         !id.isEmpty && id.count <= 64 && !thread_id.isEmpty &&
         created_at.isFinite && created_at > 0 && question.count <= 300 &&
-        (2...5).contains(options.count) && options.allSatisfy { !$0.isEmpty && $0.count <= 180 }
+        ((2...5).contains(options.count) || (options.isEmpty && !(fields ?? []).isEmpty)) &&
+        options.allSatisfy { !$0.isEmpty && $0.count <= 180 } &&
+        (fields == nil || ((1...3).contains(fields!.count) && fields!.allSatisfy { $0.isValid } &&
+                          Set(fields!.map(\.id)).count == fields!.count))
     }
 
     func submit(_ index: Int) throws {
         guard isValid, options.indices.contains(index - 1) else { throw CocoaError(.fileReadCorruptFile) }
+        try submitPayload(["index": index])
+    }
+
+    func submitForm(_ answers: [String: String]) throws {
+        guard isValid, let fields, Set(answers.keys) == Set(fields.map(\.id)),
+              fields.allSatisfy({ field in
+                  guard let value = answers[field.id] else { return false }
+                  return !value.isEmpty && value.count <= 2000 &&
+                      (field.options.isEmpty || field.options.contains(value))
+              }) else { throw CocoaError(.fileReadCorruptFile) }
+        try submitPayload(["answers": answers])
+    }
+
+    private func submitPayload(_ values: [String: Any]) throws {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/AgentProgressCard")
         let file = directory.appendingPathComponent("choice-selection.json")
-        let data = try JSONSerialization.data(withJSONObject: ["choice_id": id, "thread_id": thread_id,
-                                                                 "index": index, "created_at": Date().timeIntervalSince1970])
+        let payload = values.merging(["choice_id": id, "thread_id": thread_id,
+                                      "created_at": Date().timeIntervalSince1970]) { _, new in new }
+        let data = try JSONSerialization.data(withJSONObject: payload)
         try data.write(to: file, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         guard let resources = Bundle.main.resourceURL else { throw CocoaError(.fileNoSuchFile) }

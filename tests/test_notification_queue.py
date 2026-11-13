@@ -21,7 +21,7 @@ class NotificationQueueTests(unittest.TestCase):
         with self.store.lock, self.store.db:
             self.store.enqueue(identity, identity + ' content', category)
 
-    def test_offline_burst_keeps_latest_updates_and_all_protected_messages(self):
+    def test_offline_burst_discards_all_categories_without_claiming_delivery(self):
         self.store.put('send_requires_context', '1')
         protected = ['approval:A:part:1', 'approval:A:part:2', 'choice:C', 'prompt:P', 'uncertain:X']
         for identity in protected:
@@ -31,15 +31,10 @@ class NotificationQueueTests(unittest.TestCase):
             self.enqueue('note:f' + str(index), 'final')
             self.enqueue('delivered:' + str(index))
         self.assertIsNone(self.store.outgoing())
-        self.assertEqual(self.store.summary()['unsent'], len(protected) + 3)
-        rows = {r['id']: r for r in self.store.db.execute('SELECT * FROM outbox')}
-        for identity in protected:
-            self.assertEqual((rows[identity]['delivered'], rows[identity]['superseded']), (0, 0))
-            self.assertEqual(rows[identity]['text'], identity + ' content')
-        self.assertEqual(rows['note:p0']['text'], '')
-        self.assertEqual((rows['note:p0']['delivered'], rows['note:p0']['superseded']), (0, 1))
-        self.assertEqual(rows['note:p99']['superseded'], 0)
-        self.assertEqual(rows['note:f99']['superseded'], 0)
+        self.assertEqual(self.store.summary()['unsent'], 0)
+        rows = list(self.store.db.execute('SELECT * FROM outbox'))
+        self.assertTrue(rows)
+        self.assertTrue(all((r['delivered'], r['superseded'], r['text']) == (0, 1, '') for r in rows))
 
     def test_replayed_identity_cannot_supersede_newer_result(self):
         self.enqueue('note:old', 'final')
@@ -77,7 +72,9 @@ class NotificationQueueTests(unittest.TestCase):
         self.assertIsNone(self.store.outgoing())
         self.store.ingest({'msgs': [{**message, 'message_id': 'owner-fresh', 'from_user_id': 'owner'}]})
         self.assertFalse(self.store.summary()['send_paused'])
-        self.assertEqual(self.store.outgoing()['id'], 'note:result')
+        self.assertIsNone(self.store.outgoing())
+        mirror(self.store, {}, {})
+        self.assertTrue(self.store.outgoing()['id'].startswith('recovery:'))
 
 
 class QueueMigrationTests(unittest.TestCase):
@@ -92,10 +89,10 @@ class QueueMigrationTests(unittest.TestCase):
                     ('note:old', 'old'), ('note:new', 'new'), ('approval:A', 'protected')])
             store = RelayStore(root, 'owner', 'thread', since=1)
             try:
-                self.assertEqual(store.summary()['unsent'], 2)
+                self.assertEqual(store.summary()['unsent'], 0)
                 row = store.db.execute("SELECT delivered,superseded FROM outbox WHERE id='note:old'").fetchone()
                 self.assertEqual(tuple(row), (0, 1))
-                self.assertEqual(store.db.execute("SELECT text FROM outbox WHERE id='approval:A'").fetchone()[0], 'protected')
+                self.assertEqual(store.db.execute("SELECT text FROM outbox WHERE id='approval:A'").fetchone()[0], '')
             finally:
                 store.db.close()
 
@@ -113,7 +110,7 @@ class QueueMigrationTests(unittest.TestCase):
                     ('approval:A:part:1', 'full approval', 0), ('note:sent', 'already delivered', 1)])
             store = RelayStore(root, 'owner', 'thread', since=1)
             try:
-                self.assertEqual(store.summary()['unsent'], 2)
+                self.assertEqual(store.summary()['unsent'], 0)
                 self.assertTrue(store.summary()['send_paused'])
                 self.assertIsNone(store.outgoing())
                 old = store.db.execute("SELECT delivered,superseded,text FROM outbox WHERE id='note:old'").fetchone()
@@ -121,6 +118,6 @@ class QueueMigrationTests(unittest.TestCase):
                 sent = store.db.execute("SELECT delivered,superseded,text FROM outbox WHERE id='note:sent'").fetchone()
                 self.assertEqual(tuple(sent), (1, 0, 'already delivered'))
                 approval = store.db.execute("SELECT text,superseded FROM outbox WHERE id='approval:A:part:1'").fetchone()
-                self.assertEqual(tuple(approval), ('full approval', 0))
+                self.assertEqual(tuple(approval), ('', 1))
             finally:
                 store.db.close()

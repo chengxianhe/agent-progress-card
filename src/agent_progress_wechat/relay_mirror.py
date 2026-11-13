@@ -30,6 +30,13 @@ def snapshot(directory, thread_id):
 
 
 def choice_text(choice):
+    if choice.get('fields') and not choice['options']:
+        fields = choice['fields']
+        question = '\n'.join(f['id'] + '：' + f['title'] + ('\n可选：' + ' / '.join(f['options']) if f['options'] else '') for f in fields)
+        sample = json.dumps({f['id']: f['options'][0] if f['options'] else '你的回答' for f in fields}, ensure_ascii=False)
+        return clean_text('看板问题 ' + card_code(choice) + '\n' + question
+                          + '\n填写示例：填写 ' + card_code(choice) + ' ' + sample
+                          + '\n答复作为本人聊天发送，不代交原生表单或授予工具权限。', 12000)
     return clean_text("看板选项 " + card_code(choice) + "：" + choice["question"] + "\n"
             + "\n".join(f"{index}. {option}" for index, option in enumerate(choice["options"], 1))
             + "\n回复示例：1 " + card_code(choice) + "（选第1项）；其他项替换开头数字。", 1800)
@@ -60,7 +67,8 @@ def command_reply(text, state, feed):
             if ((feed.get("choice_result") or {}).get("choice_id") == feed["choice"]["id"]
                     and feed["choice_result"]["status"] == "uncertain"):
                 return "上次选择的投递结果不确定，请先在桌面核对。"
-            return choice_text(feed["choice"])
+            text = choice_text(feed["choice"])
+            return text if len(text) <= 2200 else '当前有待回答的多题表单；发送“选项”获取完整分段和 C 编号。'
         return overview(state, feed)
     if text in ("结果", "/result"):
         notes = [x for x in feed.get("notes", []) if x.get("kind") == "final"]
@@ -74,18 +82,23 @@ def mirror(store, state, feed):
     since = float(store.get("since"))
     now = time.time()
     with store.lock, store.db:
+        from .delivery_policy import recovery_summary
+        recovery_summary(store, state, feed)
+        since = max(since, float(store.get('push_since', '0')))
         choice = feed.get("choice")
         blocked = (choice and feed.get("choice_result")
                    and feed["choice_result"].get("choice_id") == choice["id"]
                    and feed["choice_result"].get("status") == "uncertain")
-        if choice and not blocked:
-            store.enqueue("choice:" + choice["id"], choice_text(choice))
+        if choice and not blocked and choice.get('created_at', now) >= since:
+            from .choice_notice import publish
+            publish(store, choice)
         else:
             # A cleared question must not arrive after the user has already answered it on the card.
-            store.db.execute("DELETE FROM outbox WHERE id LIKE 'choice:%' AND delivered=0")
+            store.db.execute("UPDATE outbox SET superseded=1,text='' WHERE id LIKE 'choice:%' AND delivered=0")
         questions = feed.get("question_notices") or [feed.get("latest_question")]
         for question in questions:
-            if question and not question.get("replayed") and question.get("time", 0) >= since:
+            represented = (choice and question and question['id'] == 'native:' + str(choice.get('source_question_id')))
+            if question and not represented and not question.get("replayed") and question.get("time", 0) >= since:
                 store.enqueue("prompt:" + question["id"], "客户端提问：\n" + question["text"])
         live_notes = [n for n in feed.get("notes", []) if not n.get("replayed") and n.get("time", 0) >= since]
         commentary = [n for n in live_notes if n.get("kind") == "commentary"]
@@ -109,5 +122,6 @@ def mirror(store, state, feed):
         material = {k: state.get(k) for k in ("task_id", "title", "status", "action", "detail")}
         digest = hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
         if store.get("card_digest") != digest:
-            store.enqueue("card:" + digest, overview(state, feed))
+            if not store.get('push_since') or state.get('updated_at', 0) >= since:
+                store.enqueue("card:" + digest, overview(state, feed))
             store.db.execute("INSERT OR REPLACE INTO meta VALUES ('card_digest',?)", (digest,))

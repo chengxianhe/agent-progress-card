@@ -12,6 +12,8 @@ PERMISSIONS = 'item/permissions/requestApproval'
 INPUT = 'item/tool/requestUserInput'
 MCP = 'mcpServer/elicitation/request'
 REQUEST_METHODS = {METHOD, FILE, PERMISSIONS, INPUT, MCP}
+from .request_catalog import SERVER_REQUESTS
+REQUEST_METHODS |= SERVER_REQUESTS
 
 
 def visible(value, limit=64000):
@@ -31,6 +33,9 @@ def mcp_result(action, content=None):
 
 
 def describe(method, params, changes=None):
+    from .request_catalog import LEGACY_EXEC, LEGACY_PATCH, legacy_description
+    if method in (LEGACY_EXEC, LEGACY_PATCH):
+        return legacy_description(method, params)
     if method == METHOD:
         preview = display(params)
         if preview is None:
@@ -71,6 +76,12 @@ def input_form(params):
     for q in questions:
         if not isinstance(q, dict) or q.get('isSecret'):
             raise ValueError('私密输入不能经微信普通消息提交')
+        if set(q) - {'id', 'header', 'question', 'isOther', 'isSecret', 'options'}:
+            raise ValueError('问题包含未支持字段，不能保存或代答')
+        if any(type(q[key]) is not bool for key in ('isOther', 'isSecret') if key in q):
+            raise ValueError('问题标记格式无效')
+        if 'header' in q:
+            visible(q['header'], 100)
         key = q.get('id')
         if not isinstance(key, str) or not key or key in ids:
             raise ValueError('问题 ID 无效或重复')
@@ -82,6 +93,8 @@ def input_form(params):
         for i, item in enumerate(options, 1):
             if not isinstance(item, dict) or not isinstance(item.get('label'), str) or not 1 <= len(item['label']) <= 300:
                 raise ValueError('问题选项无效')
+            if set(item) - {'label', 'description'}:
+                raise ValueError('选项包含未支持字段，不能保存或代答')
             lines.append(f'{i}. ' + visible(item['label'] + '：' + (item.get('description') or '')))
     choices = []
     if len(questions) == 1:

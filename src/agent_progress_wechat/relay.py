@@ -53,17 +53,8 @@ def main():
             if credential_path.exists():
                 credential_path.replace(directory / ("credentials-backup-" + uuid.uuid4().hex + ".json"))
             (directory / "reconnect-request").unlink(missing_ok=True)
-        session = CurrentSession(args.socket, args.thread_id)
-        try:
-            connection = session.open()
-            try:
-                session.inspect(connection)
-            finally:
-                connection.close()
-        except (OSError, ValueError, KeyError, TransportError, RpcError, SessionUnavailable):
-            save_json(directory / "connection.json", {"mode": "current_session", "thread_id": args.thread_id,
-                      "status": "error", "message": "当前 Codex 桌面会话不可用；请打开原会话后重新扫码。"})
-            raise
+        # Start owner-only transport independently. Dispatch/subscription still verify the
+        # already-bound live thread; this never opens, forks or restores a closed thread.
         (directory / "stop-request").unlink(missing_ok=True)
         stop = threading.Event()
         signal.signal(signal.SIGTERM, lambda *_: stop.set())

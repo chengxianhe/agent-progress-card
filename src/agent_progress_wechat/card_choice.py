@@ -14,16 +14,22 @@ def process_card_choice(card_directory, session):
     source = Path(card_directory) / "choice-selection.json"
     try:
         with source.open("rb") as stream:
-            raw = stream.read(1025)
-        if len(raw) > 1024:
+            raw = stream.read(32769)
+        if len(raw) > 32768:
             return
         selection = json.loads(raw)
         choice = read_choice(card_directory, session.thread_id)
         if not choice or selection.get("choice_id") != choice["id"] or selection.get("thread_id") != session.thread_id:
             return
         index = selection.get("index")
-        if not isinstance(index, int) or isinstance(index, bool) or not 1 <= index <= len(choice["options"]):
-            return
+        if selection.get('answers') is not None:
+            from agent_progress_card.question_choice import answer
+            form_text = answer(choice, selection['answers'])
+            index = None
+        else:
+            form_text = None
+            if not isinstance(index, int) or isinstance(index, bool) or not 1 <= index <= len(choice["options"]):
+                return
     except (OSError, ValueError, TypeError, KeyError):
         return
     result_path = Path(card_directory) / "choice-result.json"
@@ -35,7 +41,7 @@ def process_card_choice(card_directory, session):
         pass
     connection = session.open()
     try:
-        text = "我选择第 " + str(index) + " 项：" + choice["options"][index - 1]
+        text = form_text or ("我选择第 " + str(index) + " 项：" + choice["options"][index - 1])
         method, params = session.prepare(connection, text, choice["id"], source="card")
         try:
             reply = connection.call(method, params)
@@ -43,7 +49,9 @@ def process_card_choice(card_directory, session):
             if not isinstance(turn, str) or not turn:
                 raise TransportError("缺少回执")
             status, message = "sent", "已送入当前会话"
-        except (RpcError, TransportError, OSError):
+        except RpcError:
+            status, message = 'retry', '当前会话拒绝本次回答，没有投递成功，可稍后重试'
+        except (TransportError, OSError):
             status, message = "uncertain", "投递结果不确定；请在原会话核对，暂不自动重发"
         if status == "sent":
             complete_choice_unlocked(card_directory, session.thread_id, choice["id"], index, "card")

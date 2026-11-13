@@ -37,6 +37,7 @@ class MobileSelectionRoutingTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
         self.store = RelayStore(self.path, 'owner', 'thread', since=1)
+        self.store.put('context', 'synthetic-online')
         self.addCleanup(self.store.db.close)
         self.state = ApprovalState(self.store, 'thread')
         save_json(self.path / 'activity-source.json', {'thread_id': 'thread'})
@@ -216,4 +217,4 @@ class MobileSelectionRoutingTests(unittest.TestCase):
                 'message_type': 1, 'create_time_ms': stamp, 'context_token': 'invalid',
                 'item_list': [{'type': 1, 'text_item': {'text': '1'}}]}]})
         self.assertIsNone(self.store.next_message())
-        self.assertEqual(self.store.get('context'), '')
+        self.assertEqual(self.store.get('context'), 'synthetic-online')

@@ -36,7 +36,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request(base, endpoint, body=None, token="", timeout=35):
+def _request_direct(base, endpoint, body=None, token="", timeout=35):
     headers = {"iLink-App-Id": "bot", "iLink-App-ClientVersion": str(0x02040A),
                "Content-Type": "application/json", "AuthorizationType": "ilink_bot_token",
                "X-WECHAT-UIN": base64.b64encode(str(secrets.randbits(32)).encode()).decode()}
@@ -66,6 +66,11 @@ def request(base, endpoint, body=None, token="", timeout=35):
         raise LinkError("微信接口错误：" + safe_code, code == -14,
                         code == -2 and endpoint == "sendmessage")
     return value
+
+
+def request(base, endpoint, body=None, token='', timeout=35):
+    from .network_budget import request as bounded_request
+    return bounded_request(base, endpoint, body, token, timeout)
 
 
 class Client:

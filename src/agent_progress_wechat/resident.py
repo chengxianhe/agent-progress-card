@@ -8,10 +8,21 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 
 from agent_progress_card.store import default_directory
 from .files import read_json, save_json
+
+
+def stop_child(child):
+    if child is not None and child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=40)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def relay_target(card):
@@ -49,7 +60,7 @@ def supervise(card, stop, launch=subprocess.Popen):
         child = None
         try:
             directory, thread, status = relay_target(card)
-            save_json(card / 'resident.json', {'status': status, 'enabled': True})
+            save_json(card / 'resident.json', {'status': status, 'enabled': True, 'checked_at': time.time()})
             if thread:
                 environment = os.environ.copy()
                 environment['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -57,19 +68,28 @@ def supervise(card, stop, launch=subprocess.Popen):
                                 '--state-dir', str(directory), '--thread-id', thread, '--card-dir', str(card)],
                                env=environment, stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                save_json(card / 'resident.json', {'status': 'running', 'enabled': True})
+                launched_at = last_tick = time.time()
+                wake_grace, next_report = 0, launched_at + 10
+                save_json(card / 'resident.json', {'status': 'running', 'enabled': True,
+                          'child_pid': getattr(child, 'pid', None), 'checked_at': launched_at})
                 while child.poll() is None and not stop.wait(1):
-                    pass
+                    now = time.time()
+                    if abs(now - last_tick) > 30:
+                        wake_grace = now + 20  # Let workers refresh after sleep/clock changes.
+                    last_tick = now
+                    if now >= next_report or now < next_report - 30:
+                        save_json(card / 'resident.json', {'status': 'running', 'enabled': True,
+                                  'child_pid': getattr(child, 'pid', None), 'checked_at': now})
+                        next_report = now + 10
+                    from .worker_watchdog import unresponsive
+                    if now >= wake_grace and unresponsive(directory, thread, getattr(child, 'pid', None), launched_at, now):
+                        save_json(card / 'resident.json', {'status': 'restarting_unresponsive', 'enabled': True})
+                        stop_child(child)
+                        break
         except (OSError, ValueError, KeyError, TypeError):
             save_json(card / 'resident.json', {'status': 'waiting_for_binding', 'enabled': True})
         finally:
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=40)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
+            stop_child(child)
         stop.wait(15)
 
 

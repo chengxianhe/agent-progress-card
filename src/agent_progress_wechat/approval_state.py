@@ -26,6 +26,8 @@ class ApprovalState:
             for name, default in [('method', METHOD), ('response', ''), ('form', '{}')]:
                 if name not in columns:
                     store.db.execute(f"ALTER TABLE remote_approvals ADD COLUMN {name} TEXT DEFAULT '{default}'")
+            from .approval_codes import prepare
+            prepare(store.db)
         self.invalidate()
 
     def invalidate(self, connection=None):
@@ -37,10 +39,15 @@ class ApprovalState:
                 state = 'uncertain' if row['state'] == 'sending' else 'expired'
                 self._finish(row, state, '连接已断开；旧编号失效，请查看新的审批通知或在电脑端处理。' if state == 'expired'
                              else '提交回执未确认，不能确定结果；不会重发，请在电脑端核对。')
+            if connection is None:
+                self.store.db.execute('UPDATE remote_approvals SET server_live=0')
+            else:
+                self.store.db.execute('UPDATE remote_approvals SET server_live=0 WHERE connection=?', (connection,))
 
-    def _finish(self, row, state, note):
-        self.store.db.execute('UPDATE remote_approvals SET state=? WHERE code=?', (state, row['code']))
-        self.store.db.execute('UPDATE outbox SET delivered=1 WHERE id=? OR id LIKE ?',
+    def _finish(self, row, state, note, keep_live=False):
+        self.store.db.execute('UPDATE remote_approvals SET state=?,server_live=? WHERE code=?',
+                              (state, int(keep_live and row['server_live']), row['code']))
+        self.store.db.execute("UPDATE outbox SET superseded=1,text='' WHERE delivered=0 AND (id=? OR id LIKE ?)",
                               ('approval:' + row['code'], 'approval:' + row['code'] + ':part:%'))
         self.store.enqueue('approval-result:' + row['code'], '审批 ' + row['code'] + '：' + note)
 
@@ -48,6 +55,8 @@ class ApprovalState:
         if not isinstance(event, dict) or not isinstance(event.get('params'), dict):
             return
         params = event['params']
+        from .request_catalog import bound_params
+        params = bound_params(event.get('method'), params)
         if params.get('threadId') != self.thread_id:
             return
         method = event.get('method', '')
@@ -73,7 +82,7 @@ class ApprovalState:
             with self.store.lock, self.store.db:
                 row = self.store.db.execute('SELECT * FROM remote_approvals WHERE connection=? AND request_key=?',
                                             (connection, key)).fetchone()
-                if row and row['state'] in ('pending', 'queued', 'sending', 'native'):
+                if row and row['server_live'] and row['state'] in ('pending', 'queued', 'sending', 'native', 'expired'):
                     # Resolved also covers desktop decisions/cancellation; never claim our decision won a race.
                     self._finish(row, 'resolved', 'Codex 已关闭此请求，编号失效。可能由手机或电脑处理；执行结果请查看任务进度。')
             return
@@ -91,12 +100,14 @@ class ApprovalState:
                 raise ValueError('可展示的编号选项超过 8 项')
         except (ValueError, TypeError, KeyError) as error:
             preview, choices, form = '', [], {}
-            problem = str(error) if isinstance(error, ValueError) else '请求字段不完整或格式不受支持'
+            from agent_progress_card.sanitize import clean_text
+            problem = clean_text(str(error), 300) if isinstance(error, ValueError) else '请求字段不完整或格式不受支持'
+            form = {'native_reason': problem}
 
         with self.store.lock, self.store.db:
             if self.store.db.execute('SELECT 1 FROM remote_approvals WHERE connection=? AND request_key=?', (connection, key)).fetchone():
                 return
-            count = self.store.db.execute("SELECT count(*) FROM remote_approvals WHERE state IN ('pending','queued','sending')").fetchone()[0]
+            count = self.store.db.execute("SELECT count(*) FROM remote_approvals WHERE server_live=1 AND state IN ('pending','queued','sending','expired','native')").fetchone()[0]
             if count >= 20:
                 digest = hashlib.sha256((connection + key).encode()).hexdigest()[:16]
                 self.store.enqueue('notice:approval-limit:' + digest,
@@ -105,6 +116,7 @@ class ApprovalState:
             now, code = time.time(), 'A' + uuid.uuid4().hex[:10].upper()
             self.store.db.execute('INSERT INTO remote_approvals(code,connection,request_key,state,preview,created,expires,choices,method,form) VALUES (?,?,?,?,?,?,?,?,?,?)',
                                   (code, connection, key, 'pending' if preview else 'native', preview or '', now, now + 600, json.dumps(choices, ensure_ascii=False), method, json.dumps(form, ensure_ascii=False)))
+            self.store.db.execute('UPDATE remote_approvals SET server_live=1 WHERE code=?', (code,))
             options = '\n'.join(f"{i}. {item['label']}" for i, item in enumerate(choices, 1))
             chunks = [preview[i:i + 2200] for i in range(0, len(preview), 2200)]
             details = preview
@@ -123,10 +135,15 @@ class ApprovalState:
         with self.store.lock, self.store.db:
             rows = self.store.db.execute("SELECT * FROM remote_approvals WHERE state IN ('pending','queued','sending') AND expires<?", (time.time(),)).fetchall()
             for row in rows:
-                self._finish(row, 'uncertain' if row['state'] == 'sending' else 'expired', '编号已过期；请在电脑端核对，旧回复不会重发。')
+                self._finish(row, 'uncertain' if row['state'] == 'sending' else 'expired',
+                             '手机编号已过期；发送“审批”查询仍在等待的请求，旧回复不会重发。',
+                             keep_live=row['state'] != 'sending')
 
     def handle(self, message):
         self.expire()
+        from .approval_notice import query
+        if query(self, message):
+            return
         parsed = parse_reply(message['text'])
         numbered = numbered_reply(message['text'])
         labeled = label_reply(message['text'])
@@ -137,12 +154,7 @@ class ApprovalState:
             self.store.mark(message['id'], 'local', reply=str(error))
             return
         with self.store.lock, self.store.db:
-            if message['text'] in ('审批', '/approvals'):
-                rows = self.store.db.execute("SELECT code FROM remote_approvals WHERE state='pending' ORDER BY created").fetchall()
-                reply = '待审批编号：' + '、'.join(r['code'] for r in rows) if rows else '当前没有可在微信处理的审批；电脑弹窗可能需要原客户端确认。'
-                for row in rows:
-                    self.store.db.execute('UPDATE outbox SET delivered=0,due=0 WHERE id=? OR id LIKE ?', ('approval:' + row['code'], 'approval:' + row['code'] + ':part:%'))
-            elif parsed is None and numbered is None and filled is None and labeled is None and literal is None:
+            if parsed is None and numbered is None and filled is None and labeled is None and literal is None:
                 reply = '请回复“数字 A编号”，例如“1 A0123456789”（以通知实际编号为准）；没有提交决定，也不会作为新任务。'
             else:
                 if filled:
@@ -159,8 +171,10 @@ class ApprovalState:
                 row = self.store.db.execute('SELECT * FROM remote_approvals WHERE code=?', (code,)).fetchone()
                 sent = self.store.db.execute('SELECT delivered FROM outbox WHERE id=?', ('approval:' + code,)).fetchone()
                 missing_parts = self.store.db.execute("SELECT 1 FROM outbox WHERE id LIKE ? AND delivered=0 LIMIT 1", ('approval:' + code + ':part:%',)).fetchone()
-                problem = blocked_reply(row, message, sent, missing_parts,
+                retired = self.store.db.execute('SELECT 1 FROM retired_approval_codes WHERE code=?', (code,)).fetchone() if row is None else None
+                problem = ('这个手机编号已过期；发送“审批”取得新编号，没有提交决定。' if retired else blocked_reply(row, message, sent, missing_parts,
                                         bool((numbered or labeled) and (numbered or labeled)[1] is None))
+                           )
                 if problem:
                     reply = problem
                 else:
@@ -225,7 +239,7 @@ class ApprovalState:
 
     def claim(self, connection):
         with self.store.lock, self.store.db:
-            row = self.store.db.execute("SELECT * FROM remote_approvals WHERE state='queued' AND connection=? AND expires>=? ORDER BY created LIMIT 1",
+            row = self.store.db.execute("SELECT * FROM remote_approvals WHERE state='queued' AND server_live=1 AND connection=? AND expires>=? ORDER BY created LIMIT 1",
                                        (connection, time.time())).fetchone()
             if not row:
                 return None

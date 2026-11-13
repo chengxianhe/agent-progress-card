@@ -1,5 +1,6 @@
 """Current-session mode: durable incoming text -> same thread; card -> WeChat."""
 import sqlite3
+import os
 import threading
 import time
 
@@ -16,6 +17,12 @@ from .approval_prompt import is_approval_text, numbered_reply, label_reply
 from .approval_service import run_approvals
 from .approval_state import ApprovalState
 from .selection_text import numbered_selection, card_code, approval_syntax
+from .inbound_dispatch import take, release
+
+
+def clean_progress(reply, problem):
+    from agent_progress_card.sanitize import clean_text
+    return clean_text(reply, 1800) + '\n\n' + problem
 
 
 def selected_message(text, choice):
@@ -42,6 +49,8 @@ def seed_previous_connection(store, directory, owner):
         with store.lock, store.db:
             if context:
                 store.db.execute("INSERT OR IGNORE INTO meta VALUES ('context',?)", (context[0],))
+                from .delivery_policy import pause
+                pause(store.db)
             if cursor:
                 store.db.execute("INSERT OR IGNORE INTO meta VALUES ('cursor',?)", (cursor[0],))
             store.db.execute("INSERT OR REPLACE INTO meta VALUES ('legacy_seeded','1')")
@@ -49,9 +58,17 @@ def seed_previous_connection(store, directory, owner):
         old.close()
 
 
-def deliver(store, session, message, directory, approvals=None):
+def deliver(store, session, message, directory, approvals=None, diagnostics=None):
     """Only mark sending immediately before the mutating RPC; uncertainty is terminal."""
     check_binding(directory, session.thread_id)
+    from .remote_health import COMMANDS
+    if message['text'] in COMMANDS:
+        reply = diagnostics(False) if diagnostics else '诊断尚未初始化；没有向任务会话发送新指令。'
+        store.mark(message['id'], 'local', reply=reply)
+        return
+    from .chat_form import deliver_form
+    if deliver_form(store, session, message, directory):
+        return
     ordinary = numbered_selection(message["text"], "C", bare=False)
     if ordinary:
         with choice_lock(directory):
@@ -102,7 +119,11 @@ def deliver(store, session, message, directory, approvals=None):
             blocked = choice and result and result["choice_id"] == choice["id"] and result["status"] == "uncertain"
             if choice:
                 with store.lock, store.db:
-                    store.db.execute("DELETE FROM outbox WHERE id=? AND delivered=0", ("choice:" + choice["id"],))
+                    if not blocked:
+                        from .choice_notice import publish
+                        publish(store, choice, refresh=True)
+                        store.mark(message['id'], 'local')
+                        return
             reply = "上次选择的投递结果不确定，请先在桌面核对。" if blocked else (
                 choice_text(choice) if choice else "当前没有待选问题。")
             if not choice:
@@ -115,7 +136,12 @@ def deliver(store, session, message, directory, approvals=None):
         return
     if message["text"] in ("帮助", "/help", "进度", "/status", "结果", "/result"):
         state, feed = snapshot(directory, session.thread_id)
-        store.mark(message["id"], "local", reply=command_reply(message["text"], state, feed))
+        reply = command_reply(message["text"], state, feed)
+        if diagnostics and message['text'] in ('进度', '/status'):
+            problem = diagnostics(True)
+            if problem:
+                reply = clean_progress(reply, problem)
+        store.mark(message["id"], "local", reply=reply)
         return
     if message["text"].isdigit() and len(message["text"]) <= 2:
         with choice_lock(directory):
@@ -142,6 +168,11 @@ def deliver(store, session, message, directory, approvals=None):
 
 
 def deliver_text(store, session, message, directory, choice=None):
+    if choice:
+        from .choice_notice import incomplete
+        if incomplete(store, choice):
+            store.mark(message['id'], 'local', reply='当前问题详情尚未完整送达；发送“选项”重新获取，没有提交回答。')
+            return
     text = selected_message(message["text"], choice)
     chosen_index = int(message["text"]) if choice and text != message["text"] else None
     if choice and message["text"].isdigit():
@@ -181,13 +212,28 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
     seed_previous_connection(store, directory, credentials["owner"])
     session = CurrentSession(socket_path, thread_id)
     client = Client(credentials)
-    health, health_lock = {}, threading.RLock()
+    health, health_lock = {'codex': '正在检查绑定会话；微信收件不依赖任务会话'}, threading.RLock()
+    workers = {'main', 'poller', 'sender', 'control'}
+    progress = {name: time.monotonic() for name in workers}
     auth_expired = threading.Event()
     if remote_approvals is not None:
         store.put("remote_approvals_enabled", "1" if remote_approvals else "0")
     enabled = store.get("remote_approvals_enabled") == "1"
     approval_state = ApprovalState(store, thread_id)
     approvals = approval_state if enabled else None
+    if approvals:
+        progress['approvals'] = time.monotonic()
+
+    def beat(component):
+        with health_lock:
+            progress[component] = time.monotonic()
+
+    def diagnostics(compact=False):
+        from .remote_health import describe
+        with health_lock:
+            observed = dict(health)
+        with store.lock:
+            return describe(store, card_directory, observed, compact)
 
     def health_update(component, problem=""):
         with health_lock:
@@ -195,9 +241,9 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
 
     def publish():
         with health_lock:
-            problems = [p for p in health.values() if p]
-        if store.get("send_requires_context") == "1":
-            problems.append("微信推送已暂停；发一条新消息恢复，只保留最新普通进度和结果，审批单独保留")
+            problems = [p for key, p in health.items() if key != 'approval_waiting' and p]
+        if store.summary()['send_paused']:
+            problems.append("微信推送已暂停；所有历史通知停止积累，恢复后只发当前摘要；有效审批按需查询")
         elif store.summary()["unsent"] and time.time() < float(store.get("send_paused_until", "0")):
             problems.append("微信推送暂时退避；发“进度”刷新回信")
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
@@ -207,6 +253,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
 
     def poller():
         while not stop.is_set():
+            beat('poller')
             try:
                 batch = client.updates(store.get("cursor"))
                 if stop.is_set():
@@ -225,6 +272,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
 
     def sender():
         while not stop.is_set():
+            beat('sender')
             try:
                 if not send_outgoing(store, client):
                     stop.wait(.5)
@@ -247,23 +295,53 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             health_update(target.__name__, "转发服务异常，已停止；本机记录保留")
             stop.set()
 
-    threads = [threading.Thread(target=guarded, args=(poller,)), threading.Thread(target=guarded, args=(sender,))]
+    def control_worker():
+        while not stop.is_set():
+            beat('control')
+            message = take(store, True)
+            if message:
+                try:
+                    deliver(store, session, message, card_directory, approvals, diagnostics)
+                except (OSError, ValueError, KeyError, TransportError, RpcError, SessionUnavailable):
+                    store.mark(message['id'], 'local', reply='当前状态暂不可读取；没有提交决定。\n' + diagnostics())
+            stop.wait(.1)
+
+    def watchdog():
+        from .worker_watchdog import publish as heartbeat
+        last_tick, wake_grace = time.time(), 0
+        while not stop.is_set():
+            now = time.time()
+            if abs(now - last_tick) > 30:
+                wake_grace = now + 20
+            last_tick = now
+            with health_lock:
+                ages = {key: time.monotonic() - at for key, at in progress.items()}
+            if heartbeat(directory, thread_id, ages, wake_grace):
+                health_update('watchdog', '内部工作线程长期没有进展，桥接将受控重启；不会重做回执不确定的动作')
+                stop.set()
+                break
+            stop.wait(3)
+
+    threads = [threading.Thread(target=guarded, args=(target,), daemon=True)
+               for target in (poller, sender, control_worker, watchdog)]
     if approvals is not None:
         threads.append(threading.Thread(target=run_approvals,
-            args=(store, session, card_directory, stop, health_update, approvals)))
+            args=(store, session, card_directory, stop, health_update, approvals, beat), daemon=True))
     for thread in threads:
         thread.start()
     next_probe = 0
     try:
         while not stop.is_set():
+            beat('main')
             try:
                 check_binding(card_directory, thread_id)
             except (OSError, ValueError, KeyError):
                 health_update("binding", "小看板绑定变化，转发已停止")
                 stop.set()
                 break
+            message = None
             try:
-                message = store.next_message()
+                message = take(store, False)
                 if message:
                     deliver(store, session, message, card_directory, approvals)
                     health_update("codex")
@@ -273,6 +351,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                     try:
                         thread = session.inspect(connection)
                         flags = thread["status"].get("activeFlags", [])
+                        health_update('approval_waiting', '1' if 'waitingOnApproval' in flags else '')
                         waiting = ("当前任务等待授权；微信发送“审批”查看，未支持的类型仍需电脑确认" if approvals else
                                    "当前任务等待你在原客户端确认")
                         health_update("codex", waiting if "waitingOnApproval" in flags else "")
@@ -280,6 +359,7 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
                         connection.close()
                     next_probe = time.monotonic() + 10
             except (OSError, ValueError, KeyError, TransportError, RpcError, SessionUnavailable):
+                release(store, message)
                 health_update("codex", "当前会话暂不可投递；消息保留排队，请检查桌面会话")
                 stop.wait(2)
             try:
@@ -292,11 +372,12 @@ def run_relay(directory, credentials, thread_id, socket_path, card_directory, st
             stop.wait(.5)
     finally:
         stop.set()
+        join_deadline = time.monotonic() + 40
         for thread in threads:
-            thread.join(timeout=40)
+            thread.join(timeout=max(0, join_deadline - time.monotonic()))
         publish()
         with health_lock:
-            problems = [p for p in health.values() if p]
+            problems = [p for key, p in health.items() if key != 'approval_waiting' and p]
         save_json(directory / "connection.json", {"mode": "current_session", "thread_id": thread_id,
             "status": "expired" if auth_expired.is_set() else "stopped",
             "message": ("微信登录已失效，请在小看板重新扫码；" if auth_expired.is_set() else "转发已停止；")

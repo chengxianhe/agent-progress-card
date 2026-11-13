@@ -8,11 +8,13 @@ import time
 from agent_progress_card.sanitize import clean_text
 from .files import private_directory
 from .notification_queue import enqueue_notice, prepare_queue
+from . import delivery_policy
 
 
 class RelayStore:
     def __init__(self, directory, owner, thread_id, since=None):
         directory = private_directory(directory)
+        self.directory = directory
         path = directory / "relay.sqlite3"
         if path.is_symlink():
             raise ValueError("转发数据库不能是符号链接")
@@ -35,13 +37,18 @@ class RelayStore:
                 self.db.close()
                 raise ValueError("此转发目录已经绑定其他账号或会话")
         with self.db:
+            returning = bool(self.get('owner'))
             prepare_queue(self.db)
             for key, value in (("owner", owner), ("thread", thread_id)):
                 self.db.execute("INSERT OR IGNORE INTO meta VALUES (?,?)", (key, value))
             self.db.execute("INSERT OR IGNORE INTO meta VALUES ('since',?)", (str(since or time.time()),))
+            delivery_policy.migrate(self.db)
+            if returning:
+                delivery_policy.pause(self.db)  # A restarted bridge must not replay cached context.
             if float(self.get("send_paused_until", "0")) > 0:
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','1')")
             interrupted = self.db.execute("SELECT id FROM inbox WHERE status='sending'").fetchall()
+            self.db.execute("UPDATE inbox SET status='queued' WHERE status='dispatching'")
             self.db.execute("UPDATE inbox SET status='uncertain' WHERE status='sending'")
             for row in interrupted:
                 self.enqueue("uncertain:" + row[0], "服务恢复：有一条消息的投递回执未保存，可能已进入当前会话；不会自动重发，请先在桌面核对。")
@@ -54,10 +61,13 @@ class RelayStore:
     def put(self, key, value):
         with self.lock, self.db:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
+            if key == 'send_requires_context' and str(value) == '1':
+                delivery_policy.pause(self.db)
 
     def enqueue(self, identity, text, category=None):
         """Caller may include this in the same transaction as consuming an inbox message."""
-        enqueue_notice(self.db, identity, clean_text(text, 3200), category)
+        with self.lock:
+            enqueue_notice(self.db, identity, clean_text(text, 3200), category)
 
     def ingest(self, batch):
         if not isinstance(batch.get("msgs", []), list):
@@ -82,20 +92,24 @@ class RelayStore:
                 identity = str(identity)
                 if self.db.execute("SELECT 1 FROM inbox WHERE id=?", (identity,)).fetchone():
                     continue
+                delivery_policy.resume(self.db)
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context',?)", (context,))
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('context_at',?)", (str(time.time()),))
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_paused_until','0')")
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('send_requires_context','0')")
-                # Fresh owner input makes pending notifications immediately eligible again.
-                self.db.execute("UPDATE outbox SET due=0 WHERE delivered=0")
                 status = "queued"
                 error = ""
                 if not text:
                     error = "目前只接收文字消息。"
                 elif len(text) > 8000:
                     error = "消息超过 8000 字，请缩短后再发。"
-                elif self.db.execute("SELECT count(*) FROM inbox WHERE status IN ('queued','sending')").fetchone()[0] >= 20:
-                    error = "待转发消息已达 20 条，请稍后再试。"
+                else:
+                    from .control_messages import is_control
+                    pending = self.db.execute("SELECT text FROM inbox WHERE status IN ('queued','dispatching','sending')").fetchall()
+                    control = is_control(text)
+                    count = sum(is_control(row[0]) == control for row in pending)
+                    if count >= (40 if control else 20):
+                        error = '控制消息过多，请稍后查询当前状态。' if control else '待转发消息已达 20 条，请稍后再试。'
                 if error:
                     status = "rejected"
                 self.db.execute("INSERT INTO inbox(id,text,status,created) VALUES (?,?,?,?)",
@@ -107,7 +121,9 @@ class RelayStore:
 
     def next_message(self):
         with self.lock:
-            row = self.db.execute("SELECT * FROM inbox WHERE status='queued' ORDER BY rowid LIMIT 1").fetchone()
+            from .control_messages import is_control
+            rows = self.db.execute("SELECT * FROM inbox WHERE status='queued' ORDER BY rowid").fetchall()
+            row = next((r for r in rows if is_control(r['text'])), rows[0] if rows else None)
             return dict(row) if row else None
 
     def mark(self, identity, status, turn_id="", reply=""):
@@ -124,11 +140,15 @@ class RelayStore:
             row = self.db.execute("SELECT * FROM outbox WHERE delivered=0 AND superseded=0 AND due<=? "
                                   "ORDER BY CASE WHEN id LIKE 'local:%' THEN 0 WHEN id LIKE 'choice:%' THEN 1 "
                                   "WHEN id LIKE 'approval:%' OR id LIKE 'approval-result:%' THEN 1 "
-                                  "WHEN id LIKE 'prompt:%' THEN 2 WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, rowid LIMIT 1", (time.time(),)).fetchone()
+                                  "WHEN id LIKE 'prompt:%' THEN 2 WHEN id LIKE 'notice:%' THEN 2 ELSE 3 END, "
+                                  "CASE WHEN id LIKE 'approval:%:part:%' OR id LIKE 'choice:%:part:%' THEN 0 ELSE 1 END, rowid LIMIT 1", (time.time(),)).fetchone()
             return dict(row) if row else None
 
-    def sent(self, identity, success):
+    def sent(self, identity, success, revision=None):
         with self.lock, self.db:
+            current = self.db.execute('SELECT revision FROM outbox WHERE id=?', (identity,)).fetchone()
+            if not current or (revision is not None and revision != current[0]):
+                return
             if success:
                 self.db.execute("UPDATE outbox SET delivered=1 WHERE id=?", (identity,))
             else:
@@ -142,4 +162,4 @@ class RelayStore:
         with self.lock:
             return {"tasks": dict(self.db.execute("SELECT status,count(*) FROM inbox GROUP BY status")),
                     "unsent": self.db.execute("SELECT count(*) FROM outbox WHERE delivered=0 AND superseded=0").fetchone()[0],
-                    "send_paused": self.get("send_requires_context") == "1"}
+                    "send_paused": delivery_policy.paused(self.db)}

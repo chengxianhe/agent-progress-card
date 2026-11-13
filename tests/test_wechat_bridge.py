@@ -15,7 +15,7 @@ from agent_progress_wechat.card import Card, recover_card
 from agent_progress_wechat.database import Database
 from agent_progress_wechat.executor import command, execute, public_event
 from agent_progress_wechat.files import read_json, save_json
-from agent_progress_wechat.ilink import BASE_URL, Client, LinkError, request, trusted_base
+from agent_progress_wechat.ilink import BASE_URL, Client, LinkError, _request_direct, trusted_base
 from agent_progress_wechat.login import login
 
 
@@ -112,7 +112,7 @@ class ProtocolTests(unittest.TestCase):
         with patch("agent_progress_wechat.ilink.urllib.request.build_opener") as opener:
             opener.return_value.open.return_value = io.BytesIO(b'{"ret":-2}')
             with self.assertRaises(LinkError) as failure:
-                request(BASE_URL, "sendmessage", {"msg": {}}, token="fake-token")
+                _request_direct(BASE_URL, "sendmessage", {"msg": {}}, token="fake-token")
         self.assertTrue(failure.exception.stale_context)
         self.assertFalse(failure.exception.expired)
 

@@ -87,20 +87,21 @@ class ChoiceTests(unittest.TestCase):
             self.assertEqual(selected_message("2", choice), "我选择第 2 项：再测试")
             self.assertEqual(selected_message("3", choice), "3")
             self.assertEqual(selected_message("2", None), "2")
-            store = RelayStore(root / "wechat", "owner", "thread")
+            store = RelayStore(root / "wechat", "owner", "thread", since=1)
+            store.put("context", "fake-context")
             state = {"task_id": "task", "title": "示例", "status": "waiting", "action": "选择", "detail": ""}
             feed = {"thread_id": "thread", "notes": [], "pending": [], "choice": choice}
             mirror(store, state, feed)
             mirror(store, state, feed)
             count = store.db.execute("SELECT count(*) FROM outbox WHERE id=?", ("choice:" + choice["id"],)).fetchone()[0]
             self.assertEqual(count, 1)
-            self.assertIsNone(store.outgoing())
+            self.assertIsNotNone(store.outgoing())
             store.put("context", "fake-context")
             store.put("context_at", __import__("time").time())
             self.assertEqual(store.outgoing()["id"], "choice:" + choice["id"])
             feed["choice"] = None
             mirror(store, state, feed)
-            self.assertIsNone(store.db.execute("SELECT id FROM outbox WHERE id=?", ("choice:" + choice["id"],)).fetchone())
+            self.assertEqual(store.db.execute("SELECT superseded FROM outbox WHERE id=?", ("choice:" + choice["id"],)).fetchone()[0], 1)
             store.db.close()
 
     def test_invalid_or_stale_choice_is_not_shown(self):

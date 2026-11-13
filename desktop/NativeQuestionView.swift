@@ -5,7 +5,7 @@ struct NativeQuestionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("最近的客户端提问", systemImage: "questionmark.bubble")
+            Label(question.inactive == true ? "客户端提问记录" : "最近的客户端提问", systemImage: "questionmark.bubble")
                 .font(.callout.weight(.semibold))
             Text(Date(timeIntervalSince1970: question.time), style: .date)
                 .font(.caption).foregroundStyle(.secondary)

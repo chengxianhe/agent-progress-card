@@ -7,8 +7,10 @@ from .approval_transport import ApprovalConnection
 from .relay_mirror import check_binding
 
 
-def run_approvals(store, session, directory, stop, health, state):
+def run_approvals(store, session, directory, stop, health, state, beat=None):
     while not stop.is_set():
+        if beat:
+            beat('approvals')
         client, connection = None, uuid.uuid4().hex
         try:
             check_binding(directory, session.thread_id)
@@ -19,13 +21,14 @@ def run_approvals(store, session, directory, stop, health, state):
             client.events.clear()
             health('approvals', '')
             while not stop.is_set():
+                if beat:
+                    beat('approvals')
                 check_binding(directory, session.thread_id)
                 # Drain incoming resolutions before sending queued replies. Concurrent desktop
                 # resolution can still race; only report request closure, never who won it.
                 readable, _, _ = select.select([client.socket], [], [], .2)
                 if readable:
                     state.event(client._receive(time.monotonic() + 12), connection)
-                    continue
                 state.expire()
                 reply = state.claim(connection)
                 if reply:
