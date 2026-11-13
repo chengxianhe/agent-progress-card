@@ -24,31 +24,41 @@ struct TaskDashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if expanded && !history.tasks.isEmpty {
-                Picker("任务", selection: Binding(get: { task?.id ?? "" }, set: { selection = $0 })) {
-                    ForEach(history.tasks.reversed()) { item in
-                        Text((item.id == model.state?.task_id ? "当前 · " : "历史 · ") + item.title).tag(item.id)
+                HStack {
+                    Text(isCurrent ? "当前任务" : "历史任务")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(GlimmerTheme.secondary)
+                    Spacer()
+                    Menu {
+                        Picker("任务", selection: Binding(get: { task?.id ?? "" }, set: { selection = $0 })) {
+                            ForEach(history.tasks.reversed()) { item in
+                                Text((item.id == model.state?.task_id ? "当前 · " : "历史 · ") + item.title).tag(item.id)
+                            }
+                        }
+                    } label: {
+                        Label("切换任务", systemImage: "clock.arrow.circlepath").font(.system(size: 10))
                     }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityLabel("选择当前或历史任务")
                 }
-                .labelsHidden()
-                .accessibilityLabel("选择当前或历史任务")
                 .onChange(of: task?.id) { _ in category = "全部"; failuresOnly = false }
-                Picker("内容分类", selection: $section) {
-                    ForEach(["概览", "过程", "工具", "结果"], id: \.self) { Text($0).tag($0) }
-                }.pickerStyle(.segmented)
             }
             if let task {
                 HStack(alignment: .top) {
-                    Text(task.title).font(.headline).lineLimit(2)
-                    Spacer()
-                    Text(isCurrent ? task.status.title : "历史记录")
-                        .font(.caption).foregroundStyle(task.status == .waiting ? Color.orange : .secondary)
+                    Text(task.title).font(.system(size: 19, weight: .semibold, design: .rounded))
+                        .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    GlimmerStatusBadge(status: task.status, historical: !isCurrent)
+                }
+                if expanded {
+                    Picker("内容分类", selection: $section) {
+                        ForEach(["概览", "过程", "工具", "结果"], id: \.self) { Text($0).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("内容分类")
                 }
                 if !history.issue.isEmpty { notice(history.issue) }
                 if isCurrent && !activity.issue.isEmpty { notice(activity.issue) }
                 if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
                    let rate = activity.feed?.output_rate {
                     Text(String(format: "本轮平均输出 %.1f token/秒", rate))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.system(size: 10).monospacedDigit()).foregroundStyle(GlimmerTheme.secondary)
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -59,31 +69,34 @@ struct TaskDashboard: View {
                         }
                         if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
                            let choice = activity.feed?.choice, choice.isValid {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("需要你选择：" + choice.question).font(.callout.weight(.semibold))
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("需要你确认", systemImage: "exclamationmark.circle")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(GlimmerTheme.warning)
+                                Text(choice.question).font(.callout.weight(.medium))
                                 if choice.options.isEmpty && choice.fields != nil { ChoiceFormView(choice: choice) }
                                 ForEach(Array(choice.options.enumerated()), id: \.offset) { index, option in
-                                    Button("\(index + 1). \(option)") {
+                                    Button {
                                         do {
                                             try choice.submit(index + 1)
                                             submittedChoiceID = choice.id
                                             choiceIssue = "已提交，等待当前会话接收"
                                         } catch { choiceIssue = "提交失败，请检查本机卡片权限" }
-                                    }
+                                    } label: { GlimmerChoiceLabel(number: index + 1, title: option) }
+                                    .buttonStyle(GlimmerChoiceStyle())
                                     .disabled((submittedChoiceID == choice.id && activity.feed?.choice_result?.status != "retry") ||
                                               (activity.feed?.choice_result?.choice_id == choice.id && activity.feed?.choice_result?.status != "retry"))
                                 }
                                 Text(activity.feed?.choice_result?.choice_id == choice.id
                                      ? activity.feed?.choice_result?.message ?? choiceIssue
                                      : choiceIssue.isEmpty ? "点击选项，或在微信回复编号。" : choiceIssue)
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+                                    .font(.caption).foregroundStyle(GlimmerTheme.secondary)
+                            }.glimmerSurface(GlimmerTheme.warningWash)
                         }
                         if isCurrent, activity.issue.isEmpty, activity.feed?.choice == nil,
                            activity.feed?.choice_result?.thread_id == task.thread_id,
                            let result = activity.feed?.choice_result, result.status == "sent" {
                             Label(result.message, systemImage: "checkmark.circle.fill")
-                                .font(.caption).foregroundStyle(.green)
+                                .font(.caption).foregroundStyle(GlimmerTheme.success)
                         }
                         if activity.issue.isEmpty,
                            let reply = currentConversationReply(activity.feed, threadID: task.thread_id, isCurrent: isCurrent) {
@@ -99,16 +112,26 @@ struct TaskDashboard: View {
                 }
             } else {
                 if !history.issue.isEmpty { notice(history.issue) }
-                WorkExplanationView(text: model.state?.action ?? "等待任务开始")
-                Text(history.issue.isEmpty ? "新任务开始后，分类记录会自动出现在这里。" : "历史暂时无法载入，修复后会恢复分类与工具记录。")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    Spacer()
+                    GlimmerIcon(size: 64)
+                    Text(model.state?.action ?? "等待新的任务")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text(history.issue.isEmpty ? "任务开始后，微光会在这里\n记录进展、工作说明与回复。" : "历史暂时无法载入，\n修复后会恢复分类与工具记录。")
+                        .font(.callout).foregroundStyle(GlimmerTheme.secondary)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }.frame(maxWidth: .infinity)
             }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(GlimmerTheme.ink)
+        .tint(GlimmerTheme.accent)
     }
 
     private func notice(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.circle")
-            .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            .font(.caption).foregroundStyle(GlimmerTheme.warning).fixedSize(horizontal: false, vertical: true)
     }
 
     private func overview(_ task: HistoryTask) -> some View {
@@ -117,16 +140,18 @@ struct TaskDashboard: View {
             if task.failures > 0 { notice("最近记录中有 \(task.failures) 次失败调用，可在工具页查看；不等于整个任务失败。") }
             if isCurrent, activity.issue.isEmpty, activity.feed?.thread_id == task.thread_id,
                let pending = activity.feed?.pending.last, task.status.isActive {
-                Label("执行中 · " + pending.name, systemImage: "hourglass").font(.caption)
+                Label("执行中 · " + pending.name, systemImage: "circle.dotted")
+                    .font(.caption).foregroundStyle(GlimmerTheme.accent)
             }
-            WorkExplanationView(text: task.latestExplanation).frame(height: expanded ? 140 : 105)
+            WorkExplanationView(text: task.latestExplanation, title: task.status == .running ? "正在处理" : "工作说明")
+                .frame(height: expanded ? 125 : 90)
             HStack {
                 Text("最近调用 \(task.calls.count) · 工作记录 \(task.steps.count)")
                 Spacer()
                 Text(Date(timeIntervalSince1970: task.updated_at), style: .time)
-            }.font(.caption2).foregroundStyle(.secondary)
+            }.font(.caption2).foregroundStyle(GlimmerTheme.secondary)
             ForEach(Array(task.calls.suffix(expanded ? 2 : 1).reversed())) { call in
-                ToolActivityRow(call: call, expanded: false)
+                ToolActivityRow(call: call, expanded: false).glimmerSurface()
             }
             if task.legacy { notice("旧版仅保留部分摘要，缺失的调用历史无法补齐。") }
         }
@@ -161,7 +186,7 @@ struct TaskDashboard: View {
             Text("保存最近 20 条 · 当前筛选 \(filtered.count) 条").font(.caption2).foregroundStyle(.secondary)
             ForEach(filtered) { call in
                 ToolActivityRow(call: call, expanded: true)
-                    .padding(10).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                    .glimmerSurface()
             }
             if filtered.isEmpty { Text("没有符合筛选条件的调用").foregroundStyle(.secondary) }
         }

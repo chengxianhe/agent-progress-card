@@ -34,106 +34,6 @@ final class CardModel: ObservableObject {
     }
 }
 
-struct CardView: View {
-    @ObservedObject var model: CardModel
-    @ObservedObject var activity: ActivityModel
-    @StateObject private var history = HistoryModel()
-    @StateObject private var wechat = WeChatConnectionModel()
-    @State private var showWeChat = false
-    @State private var expanded = false
-    @State private var pinned = true
-    @State private var promptedChoiceID: String?
-    @State private var promptedQuestionID: String?
-    @State private var presentedPrompt: PromptPresentation?
-    let resize: (Bool) -> Void
-    let pin: (Bool) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("任务看板", systemImage: "square.grid.2x2").font(.headline)
-                Spacer()
-                Button {
-                    pinned.toggle()
-                    pin(pinned)
-                } label: { Image(systemName: pinned ? "pin.fill" : "pin") }
-                .buttonStyle(.bordered)
-                .accessibilityLabel(pinned ? "取消置顶" : "置顶")
-            }
-            if wechat.configured {
-                Button {
-                    showWeChat.toggle()
-                    if showWeChat && !expanded {
-                        expanded = true
-                        resize(true)
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: wechat.connected ? "checkmark.message.fill" : "message")
-                            .foregroundStyle(wechat.connected ? Color.green : Color.secondary)
-                        Text(wechat.label)
-                        Spacer()
-                        Text(showWeChat ? "返回任务" : "连接设置").foregroundStyle(.secondary)
-                        Image(systemName: showWeChat ? "chevron.up" : "chevron.right")
-                    }.font(.caption)
-                }.buttonStyle(.plain).accessibilityLabel(showWeChat ? "返回任务看板" : "查看微信连接设置")
-            }
-            Divider()
-            if showWeChat {
-                WeChatConnectionView(model: wechat).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                TaskDashboard(model: model, activity: activity, history: history, expanded: expanded)
-            }
-            if model.readError {
-                Text("任务状态暂时不可读；当前为最后记录。")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            HStack {
-                Text("本地记录 · 最多 12 个任务").font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    expanded.toggle()
-                    if !expanded { showWeChat = false }
-                    resize(expanded)
-                } label: {
-                    Label(expanded ? "收起" : "展开分类", systemImage: expanded ? "chevron.up" : "chevron.down")
-                }.buttonStyle(.bordered)
-            }.fixedSize(horizontal: false, vertical: true).layoutPriority(1)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(item: $presentedPrompt) { prompt in
-            switch prompt {
-            case .choice(let choice): ChoicePromptView(choice: choice)
-            case .question(let question): NativeQuestionSheet(question: question)
-            }
-        }
-        .onReceive(activity.$feed) { feed in
-            guard let feed, feed.error.isEmpty else {
-                presentedPrompt = nil
-                return
-            }
-            if let choice = feed.choice, choice.isValid,
-               !(feed.choice_result?.choice_id == choice.id && feed.choice_result?.status != "retry") {
-                if let source = choice.source_question_id { promptedQuestionID = "native:" + source }
-                if promptedChoiceID != choice.id {
-                    promptedChoiceID = choice.id
-                    presentedPrompt = .choice(choice)
-                }
-                return
-            }
-            if case .choice = presentedPrompt { presentedPrompt = nil }
-            if let question = feed.latest_question, question.isValid, !question.replayed, question.inactive != true,
-               promptedQuestionID != question.id,
-               Date().timeIntervalSince1970 - question.time < 86400 {
-                promptedQuestionID = question.id
-                presentedPrompt = .question(question)
-            }
-        }
-    }
-}
-
 @MainActor
 final class CardDelegate: NSObject, NSApplicationDelegate {
     private var panel: CardWindow!
@@ -141,17 +41,22 @@ final class CardDelegate: NSObject, NSApplicationDelegate {
     private let activity = ActivityModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let icon = GlimmerTheme.icon { NSApp.applicationIconImage = icon }
         let menu = NSMenu()
         let item = NSMenuItem()
         menu.addItem(item)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "显示任务卡片", action: #selector(showCard), keyEquivalent: "0")
+        appMenu.addItem(withTitle: "显示微光", action: #selector(showCard), keyEquivalent: "0")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出任务卡片", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "退出微光", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = appMenu
         NSApp.mainMenu = menu
         panel = CardWindow()
-        panel.title = "任务卡片"
+        panel.title = "微光"
+        panel.titleVisibility = .hidden
+        panel.addTitlebarAccessoryViewController(GlimmerTitlebarAccessory(title: "微光"))
+        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = NSColor(GlimmerTheme.canvas)
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.setFrameAutosaveName("AgentProgressCard")

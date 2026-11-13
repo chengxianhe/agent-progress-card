@@ -18,7 +18,7 @@ final class WeChatLoginDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "个人微信 · 连接小看板"
+        window.title = "微光 · 微信连接"
         window.isReleasedWhenClosed = false
         let title = NSTextField(labelWithString: "把任务发到微信")
         title.font = .systemFont(ofSize: 24, weight: .semibold)
@@ -65,7 +65,7 @@ final class WeChatLoginDelegate: NSObject, NSApplicationDelegate {
         status.stringValue = value["message"] as? String ?? "等待连接状态"
         let state = value["status"] as? String ?? ""
         let isRelay = value["mode"] as? String == "current_session"
-        window.title = isRelay ? "个人微信 · 当前会话" : "个人微信 · 连接小看板"
+        window.title = isRelay ? "微光 · 当前会话" : "微光 · 微信连接"
         code.isHidden = state != "need_verifycode"
         submit.isHidden = code.isHidden
         let qr = value["qr"] as? String ?? ""

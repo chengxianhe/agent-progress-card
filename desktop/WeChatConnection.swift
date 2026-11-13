@@ -152,11 +152,12 @@ struct WeChatConnectionView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Label(model.label, systemImage: model.connected ? "checkmark.message.fill" : "message")
-                    .font(.headline)
+                    .font(.headline).foregroundStyle(GlimmerTheme.accent)
                 if !model.issue.isEmpty {
-                    Text(model.issue).foregroundStyle(.orange).font(.callout)
+                    Text(model.issue).foregroundStyle(GlimmerTheme.warning).font(.callout)
                 }
                 Text(model.state?.message ?? "等待连接状态").font(.callout).textSelection(.enabled)
+                    .glimmerSurface()
                 if let text = model.state?.qr, let qr = qrImage(text) {
                     Image(nsImage: qr).interpolation(.none).resizable()
                         .frame(width: 210, height: 210)

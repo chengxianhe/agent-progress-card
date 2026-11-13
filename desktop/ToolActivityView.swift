@@ -33,8 +33,7 @@ struct ToolActivityList: View {
                 }
                 ForEach(Array(feed.calls.suffix(expanded ? 20 : 3).reversed())) { call in
                     ToolActivityRow(call: call, expanded: expanded)
-                        .padding(10)
-                        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                        .glimmerSurface()
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -59,9 +58,12 @@ struct ToolActivityRow: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
+                Image(systemName: call.category == "file" ? "doc.text" : "terminal")
+                    .font(.caption).foregroundStyle(GlimmerTheme.secondary)
                 Text(call.name).font(.callout.weight(.semibold)).lineLimit(2)
                 Spacer(minLength: 4)
-                Text(status).font(.caption2).foregroundStyle(call.status == "failed" ? Color.red : .secondary)
+                Text(status).font(.caption2)
+                    .foregroundStyle(call.status == "failed" ? GlimmerTheme.failure : GlimmerTheme.secondary)
                 if let duration = call.duration {
                     Text(String(format: "%.2f 秒", duration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }

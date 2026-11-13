@@ -1,186 +1,242 @@
-# Agent Progress Card
+<div align="center">
+  <img src="desktop/Assets/AppIcon.png" width="96" alt="Weiguang app icon">
+  <h1>微光 · Weiguang</h1>
+  <p><strong>See what your Codex task is doing, at a glance.</strong></p>
+  <p>A desktop progress card, task and tool history, and optional owner-only WeChat interaction.</p>
+  <p>macOS 13+ · SwiftUI / AppKit · Python standard library · MIT</p>
+  <p><a href="README.md">中文</a> · <a href="#quick-start">Quick start</a> · <a href="#optional-wechat-interaction">WeChat</a> · <a href="#troubleshooting">Troubleshooting</a></p>
+</div>
 
-[中文](README.md)
+Weiguang, formerly Agent Progress Card, brings one explicitly bound **Codex conversation** to your desktop:
+the current task, public work notes, tool activity and latest reply stay within reach. Optionally connect your
+own WeChat account to check progress, send tasks and answer supported choices or requests away from the desk.
 
-A native macOS card showing an AI assistant's task status, public work notes, tool calls,
-latest reply and task history. An optional owner-only WeChat relay sends tasks to an already-open,
-explicitly bound Codex conversation and supports typed phone approvals and form replies.
+Work still runs in your existing Codex conversation. Displaying records and answering local status queries do not
+call another model. Sending tasks and choices incurs that conversation's normal model usage; Weiguang needs no separate model API key.
 
-No web server or additional model API key is required. This is not an agent engine: work stays in
-Codex. It does not expose hidden reasoning or read unrelated conversations, personal chats or groups.
+## What it helps with
 
-## Features
+| When you want to… | Weiguang provides… |
+| --- | --- |
+| Follow a long-running task without repeatedly switching back to chat | A pinnable card with the current action, public notes and recent calls |
+| Find the assistant's most recent reply | A dedicated latest-reply card and a Results view |
+| Answer a question that needs your decision | Clickable numbered choices and text/multiple-question forms; supported phone replies are optional |
+| See which tools ran or failed | Tool-type filters, a failures-only view and expandable redacted details |
+| Follow up while away from your computer | Owner-only WeChat status queries, text to the same conversation and supported formal requests |
 
-- Draggable, pinnable SwiftUI/AppKit card with expanded and compact views.
-- Current/history selection, task categories and tool/failure filters.
-- Redacted, bounded tool details and public work notes; latest completion reply.
-- Average output tokens per second for the current turn, including tool wait time.
-- Card choices and new ordinary asynchronous questions use C codes; multiple questions and text answers are supported.
-- Owner-only WeChat pairing; disconnection drops all pending notifications and recovery sends one current summary.
-- Opt-in formal approvals and forms use A codes; active requests can be queried without replaying old notices.
-- Local diagnostics distinguish WeChat transport, task, approvals, collection and supervision health.
-- Optional per-user background supervision that restarts failed relays and respects manual stops.
+Phone interaction requires an available computer, network and bound conversation. See [WeChat setup](#optional-wechat-interaction).
 
-## Build and install
+## A look at the interface
 
-Requires macOS 13+, Xcode Command Line Tools and Python 3.10+.
-The bundled collector uses CLT's `/usr/bin/python3`; that subset supports Python 3.9.
+Soft neutral grays and muted copper accents follow the system light/dark appearance.
+The native window can be dragged, pinned, expanded or collapsed.
+
+<p align="center">
+  <img src="docs/images/weiguang-light.png" width="300" alt="Light appearance with current task, tabs, numbered choices and work notes">
+  <img src="docs/images/weiguang-dark.png" width="300" alt="Dark appearance with low-glare gray surfaces and complete numbered choices">
+</p>
+
+These **content-view previews use synthetic task data** and contain no real account, chat or conversation information.
+
+- **Overview**: current action, public notes, pending choices and recent calls.
+- **Process**: recent public work records in time order.
+- **Tools**: call types, durations, failures and expandable details.
+- **Results**: recorded task status and latest completion reply. A completed status is not human acceptance.
+
+<details>
+<summary>See the compact view and a text-answer form</summary>
+
+<p>
+  <img src="docs/images/weiguang-compact.png" width="300" alt="Compact Weiguang window with a task and pending choices">
+  <img src="docs/images/weiguang-form.png" width="300" alt="An ordinary question with selection and text fields">
+</p>
+
+Short questions fit their contents. Long questions, multiple choices and forms remain scrollable.
+Ordinary chat answers and formal tool approvals use different handling.
+
+</details>
+
+## Quick start
+
+Run the following commands from this repository's root. Initial setup uses the terminal and builds locally.
+
+### 1. Prepare and build
+
+You need **macOS 13+, Xcode Command Line Tools, Python 3.10+**, and an installed Codex client.
+The command-line packages use the Python standard library. The bundled collector uses CLT's `/usr/bin/python3`;
+that subset also supports Python 3.9.
+
+If the build tools are missing, run `xcode-select --install` and complete installation first.
 
 ```bash
 git clone https://github.com/chengxianhe/agent-progress-card.git
 cd agent-progress-card
 bash desktop/build.sh
-open build/AgentProgressCard.app
 ```
 
-Install missing build tools with `xcode-select --install`. Builds target your machine's architecture
-and are ad-hoc signed, not notarized. The local module-map overlay does not modify the system SDK.
+This builds `build/微光.app` for your machine's architecture. It is ad-hoc signed, not Apple-notarized.
 
-Optionally run `python3 desktop/install.py` to install under `~/Applications/`.
-It refuses to overwrite an existing app; read [migration instructions](docs/migration.md) before updating.
-Closing the window hides it; Cmd+Q exits the app and its event collector. WeChat services are separate.
+### 2. Select and attach one Codex conversation
 
-## Attach a conversation and publish progress
+Open the intended conversation in Codex and ensure it has started at least one task turn. Identify:
 
-Use an explicitly selected transcript and its matching thread UUID:
+| Parameter | Value |
+| --- | --- |
+| `--transcript` | The full path to that conversation's `rollout.jsonl` |
+| `--thread-id` | The UUID of the same conversation |
+
+If you do not know these values, ask the assistant in that conversation to help verify them; you do not need to
+share your whole chat directory. There is currently no graphical conversation-selection wizard.
 
 ```bash
+# Replace both placeholders with values from the same conversation.
 PYTHONPATH=src python3 -m agent_progress_card.attach \
-  --transcript /absolute/path/to/rollout.jsonl --thread-id THREAD_UUID
+  --transcript /absolute/path/to/rollout.jsonl \
+  --thread-id THREAD_UUID
 ```
 
-Attachment validates the identity and reads public events from the recent turn onward.
-Do not scan unrelated conversations to guess a binding. The app must remain open for its collector;
-the WeChat supervisor does not replace it.
+Attachment validates the identity and collects public events from the latest task turn onward.
+It does not guess or switch to other conversations.
 
-Progress can also be published explicitly:
+### 3. Publish your first card task, then open the window
+
+**Attachment collects records; a user, assistant or script explicitly publishes the task title and status.**
+For your first task:
 
 ```bash
-PYTHONPATH=src python3 -m agent_progress_card begin --title 'Review docs' --action 'Read source'
-# Replace TASK_ID with the returned ID.
-PYTHONPATH=src python3 -m agent_progress_card update --task-id TASK_ID \
-  --status succeeded --action 'Automatic checks passed'
+PYTHONPATH=src python3 -m agent_progress_card begin \
+  --title 'My first task' --action 'Waiting for a work update'
+open "build/微光.app"
 ```
 
-States are `running`, `waiting`, `succeeded` and `failed`. Use `waiting` for human review.
-A final reply or succeeded state is not user acceptance. `begin --replace` changes the displayed task,
-not the assistant's running work. Output token rate is an average, not instantaneous speed or cost.
+Keep the returned `task_id`. This creates a display record; start the actual work in the bound Codex conversation.
+Continue a task there: the card should show your title, then refresh public notes, tool records and replies.
+Use `update` for stages and status changes; see [publishing progress](#publish-progress-from-an-assistant-or-script).
 
-## Owner-only WeChat relay
+### 4. Install the app and keep it in the Dock
 
-Open the bound conversation in Codex, then run:
+After checking the local build, optionally install it:
+
+```bash
+python3 desktop/install.py
+open "$HOME/Applications/微光.app"
+```
+
+The installer refuses to overwrite an existing new-name or old-name app. Read [migration instructions](docs/migration.md) before upgrading.
+Existing history, bindings and credentials retain their data locations. The application file and its Dock name are **微光**.
+
+To keep it in the bottom Dock, open the app, Control-click its icon and choose **Options → Keep in Dock**.
+See [Apple's Dock guide](https://support.apple.com/guide/mac-help/mh35859/mac).
+For a double-clickable desktop entry, create a Finder alias of 微光.app and put the alias on the desktop; keep the actual app installed.
+
+Closing the window hides the card. `Cmd+Q` exits the app and its collector follows its parent process out.
+WeChat background services are managed separately.
+
+## Optional WeChat interaction
+
+**Skip this section if you only want the desktop card.** The relay uses the same already-open Codex conversation.
+Your account must support iLink/ClawBot, and the local Codex control socket must be available. Pairing availability depends on the service.
+
+After attaching the desktop card, keep that conversation open in Codex and run:
 
 ```bash
 PYTHONPATH=src python3 -m agent_progress_wechat.relay \
   --state-dir "$PWD/runs/wechat" --thread-id THREAD_UUID
 ```
 
-Pair in the card's connection settings. Your account must support iLink/ClawBot; availability depends
-on the service. Only the pairing owner is accepted. See [WeChat details](docs/wechat.md).
+Scan the QR code in the card's connection settings and enter a pairing code if prompted.
+Initially this can run in the foreground; `Ctrl+C` stops that process. Install the optional
+[per-user supervisor](docs/wechat-resident.md) explicitly if you want background operation.
 
-Ordinary text enters the same Codex conversation and incurs normal model usage. Local commands
-`诊断` / `出门检查` (diagnostics / preflight), `进度` (progress), `结果` (result), `帮助` (help),
-`选项` (choices) and `审批` (approvals) query local state. `审批 2` requests page 2;
-`审批 A_CODE` requests one active request's complete details.
-Polling and local state queries do not call the model. Use the card's stop button to pause synchronization.
-
-### Three different kinds of choices
-
-| Type | How it is answered |
+| Send to your paired bot | What happens |
 | --- | --- |
-| Explicit card choice | Card click or WeChat number becomes a user message in the bound conversation |
-| Native ordinary form | Numbered/JSON replies when a formal request arrives; transcript-only records cannot submit a native answer |
-| Command approval | Opt-in formal approval response, sent only after the owner explicitly chooses |
+| Ordinary text | Sends a task or follow-up to the bound Codex conversation, with normal model usage |
+| `进度` / `结果` / `帮助` | Reads local progress, results or help without starting another model task |
+| `选项` | Retrieves the current ordinary question; use the complete reply code shown in the notice |
+| `审批` | Lists active requests; `审批 2` requests page 2 and `审批 A_CODE` retrieves one full request |
+| `诊断` / `出门检查` | Reports current transport, task, approval, collector and supervision evidence |
 
-Publish an ordinary card choice:
+**C codes are ordinary chat choices; A codes are formal requests.** Follow each notice's actual order instead of
+assuming that a fixed number means Allow. Read all detail parts before deciding.
+Multiple-question and text replies use the displayed `填写 C_CODE JSON` or `填写 A_CODE JSON` format.
+
+Phone adapters for commands, MCP approvals and supported formal forms are opt-in: stop the existing relay normally,
+then add `--remote-approvals` to its command. Restart with `--no-remote-approvals` to disable them.
+The preference is retained for that paired account and conversation; Codex model and permission policies remain unchanged.
+Persistent grants, identity checks, secret inputs and unsupported structures need their native client.
+See [request coverage](docs/remote-approvals.md).
+
+Disconnection or restart drops historical pending notifications. Fresh owner input resumes delivery with one current
+summary; active questions and requests can be queried on demand. Login expiry, sleep and upstream rejection still affect
+availability. Background supervision cannot guarantee continuous phone delivery.
+See [WeChat details](docs/wechat.md) and [recovery behavior](docs/wechat-queue-policy.md).
+
+## Publish progress from an assistant or script
+
+Give the assistant this command convention. Run from the Weiguang repository root and replace `TASK_ID` with the actual ID.
+
+```bash
+# Start a card task and retain its task_id.
+PYTHONPATH=src python3 -m agent_progress_card begin \
+  --title 'Update project docs' --action 'Check existing features'
+
+# Publish a stage.
+PYTHONPATH=src python3 -m agent_progress_card update \
+  --task-id TASK_ID --status running --action 'Checking setup instructions'
+
+# Leave the result for human review.
+PYTHONPATH=src python3 -m agent_progress_card update \
+  --task-id TASK_ID --status waiting --action 'Checks passed; ready for review'
+```
+
+States are `running`, `waiting`, `succeeded` and `failed`. Human acceptance remains a separate decision.
+Update the existing ID when a task is active. `begin --replace` explicitly switches the display; it does not cancel Codex work.
+
+Publish an ordinary choice:
 
 ```bash
 PYTHONPATH=src python3 -m agent_progress_card choice \
-  --question 'Which part first?' --option 'Card UI' --option 'WeChat relay'
+  --question 'Which part first?' --option 'Improve the UI' --option 'Document setup'
 ```
 
-Acknowledged delivery clears the choice. Ambiguous delivery is not automatically resubmitted.
-If the user answers directly in chat or cancels, call
-`PYTHONPATH=src python3 -m agent_progress_card clear-choice`. Choices expire after 24 hours.
-The collector can also create C-coded choices for new ordinary asynchronous questions.
-Text and multiple-question replies use the displayed `填写 C_CODE JSON` format and enter the conversation
-as owner chat. A native form requires a formal A-coded request to submit its protocol response.
+Acknowledged card/WeChat delivery clears the choice. If the user answers directly in chat, the assistant calls `clear-choice`.
+Ambiguous delivery is not automatically repeated.
 
-### Phone approvals and forms
+## Troubleshooting
 
-Stop the existing relay normally, then restart with `--remote-approvals` to opt in.
-This preference is retained for the paired account and thread. Restart with `--no-remote-approvals`
-to disable it. Codex permissions, model settings and persistent command rules are not overridden.
+| Symptom | Start here |
+| --- | --- |
+| The card keeps waiting for a task | Attaching is separate from creating a task; run `begin` and confirm the bound conversation is open |
+| No task turn was found | Start at least one task turn in that Codex conversation; verify the path/UUID pair |
+| The title remains but records stop changing | It may be the last known state; check Codex, collector and binding, or send `诊断` in WeChat |
+| Phone notifications stop arriving | Send `进度` in your paired bot chat; an expired reply context is different from expired login |
+| WeChat continues after the window closes | The services are independent; use Stop WeChat Sync to pause the relay |
+| Will it work while my computer is off or asleep? | Availability is not guaranteed; the computer, network and conversation must remain available |
 
-WeChat preserves the server-provided option order. Reply with an option number and the displayed
-approval code, separated by a space. A bare number works only for one notified pending approval
-with no competing ordinary choice. Never assume that a fixed number always means approval.
+Weiguang reads public events from the specified conversation. It does not expose internal reasoning or read
+personal WeChat contacts, chat lists or groups. Tool details are redacted and bounded. History retains up to
+12 tasks, 20 calls and 30 work notes per task; it is not a complete audit archive.
 
-Compact prompts show the command, working directory, reason and numbered options.
-Command previews support up to 60,000 characters (directory: 300; reason: 400). Long content is sent in complete numbered parts of 2,200 characters.
-Fallback notices explain why desktop confirmation is needed without echoing sensitive content.
-Approval is blocked until all detail parts have been sent. Codes expire within 10 minutes and become
-invalid after disconnection, restart or desktop resolution. One-time allow, decline and cancel are supported;
-options granting session-wide or persistent permission remain desktop-only. Unsupported or incomplete
-permission previews also stay in the original client. A request-closed receipt is not proof of command success.
-See [approval implementation and validation](docs/remote-approvals.md).
+State lives under `~/Library/Application Support/AgentProgressCard/`; WeChat credentials live in the selected state directory.
+Do not share credentials, QR codes, databases, raw chats or real conversation identifiers. Redaction is best effort; review before sharing records.
 
-MCP tool Allow/Cancel, formal native questions, supported primitive MCP forms, one-time file changes with complete diffs, and turn-scoped permission requests use their own protocol responses. For one notified request without a competing card choice, `Allow`/`Cancel` are also accepted. Text/multiple-question answers use `填写 A_CODE {"question_id":"answer"}` as shown in the notice. Long supported previews are split into numbered parts; approval waits until all parts have been sent.
+## Documentation and development
 
-Session/persistent grants are not enabled. Sensitive or unsupported schemas and identity-verification flows receive a limitation notice. Host-only UI forms do not necessarily emit a formal app-server request; ordinary assistant choices should use explicit card choices so the user can answer by phone. Test coverage of an adapter does not establish live compatibility for every client dialog.
-
-### Background operation and missing replies
-
-An explicitly installed per-user LaunchAgent starts after login and supervises the relay.
-It avoids duplicate pollers and respects manual stop requests. See [setup and removal](docs/wechat-resident.md).
-
-Supervision cannot remove WeChat's upstream delivery restrictions. `-2 / prepare failed` may mean that
-outbound replies are temporarily rejected while the local process still receives messages; it does not by
-itself establish login expiry. Current-session mode pauses outbound delivery until a fresh owner message,
-rather than periodically probing the rejected context. All pending notification categories are discarded after disconnection, including prompts, approvals,
-receipts and warnings. Restart requires fresh owner input. Resume produces one current summary;
-request still-active details with `审批 Acode` or the current ordinary form with `选项`.
-Server acceptance does not prove the phone displayed a message. Sleep, network loss and a closed Codex
-conversation also affect operation.
-
-## Recovery coverage
-
-Current source changes address control-message capacity and scheduling, total frame deadlines,
-fair approval processing, all-category offline suppression and explicit request queries.
-Owner queries remain available when the task backend is temporarily unavailable; closed conversations
-are not reopened. An explicit approvals query may renew an expired code only while the same connection
-still knows the request is pending. Old codes and uncertain submissions are never replayed.
-
-The existing supervisor detects stalled workers in its own relay child and allows a wake-up grace period.
-Send `出门检查` before leaving to check current transport, task, approval, collector and supervisor evidence.
-An offline computer, expired login, OS permissions and unsupported forms still need a separate access path.
-See [coverage and limits](docs/recovery-and-mobile-requests.md) and [verification records](docs/verification.md);
-automatic source checks do not establish phone or window acceptance.
-
-## Privacy, compatibility and verification
-
-State lives under `~/Library/Application Support/AgentProgressCard/`; WeChat credentials and queues
-live in the chosen state directory. Credentials, raw chats, real session identifiers, databases, QR codes,
-logs and build output are excluded from source publication. Redaction remains best effort.
-History is bounded to 12 tasks, 20 calls and 30 work notes per task; it is not a complete audit archive.
-
-Local Codex integration is experimental, tested with CLI 0.167.0. Revalidate after client upgrades.
+- [WeChat setup and troubleshooting](docs/wechat.md) · [Phone approvals and forms](docs/remote-approvals.md)
+- [A/C reply routing](docs/mobile-approval-routing.md) · [Request coverage and recovery](docs/recovery-and-mobile-requests.md)
+- [Background supervision](docs/wechat-resident.md) · [Migration](docs/migration.md)
+- [Verification](docs/verification.md) · [UI and naming decisions](docs/design-weiguang.md)
 
 ```bash
 bash scripts/verify.sh
 ```
 
-Current checks run 212 Python tests, build both native entry points and run eight native model suites.
-Tests use synthetic data and do not contact WeChat. Live messaging, mobile approvals and window interaction
-require separate validation. Logs stay in ignored `build/verification/`; see [verification scope](docs/verification.md).
+This macOS revision runs **212 Python tests, two native builds and eight model suites**.
+Tests use synthetic data and do not send live WeChat messages. The user confirmed this local Dock icon and name;
+that does not establish live acceptance for every phone request. Formal forms, file changes and turn-scoped permissions
+retain their individual [verification limits](docs/verification.md). The local Codex interface is experimental; revalidate after client upgrades.
 
-Earlier phone checks succeeded for one-time Allow in a four-option MCP prompt and a numbered reply to a 3,798-character command sent in two parts.
-The recovery revision has local installation and desktop-choice display records, but the phone feedback
-reported no notification received. Its recovered phone path still needs acceptance.
-The 60,000-character boundary, exact reassembly and incomplete-delivery guard have automated coverage, not equivalent live WeChat validation.
-Formal forms, file changes and turn-scoped permission adapters still need their respective live phone checks. Transcript-only client forms cannot submit a native answer through WeChat.
+Sources: `desktop/` for native UI/build tools, `src/agent_progress_card/` for collection and records,
+`src/agent_progress_wechat/` for the relay, and `tests/` for regression coverage.
 
-Sources: `desktop/` for native UI/build tools, `src/agent_progress_card/` for state and collection,
-`src/agent_progress_wechat/` for the relay, and `tests/` for regression tests.
-This repository has its own package names and history, with no dependency on the original demo engine.
-[MIT License](LICENSE); retained attribution is in [NOTICE](NOTICE).
+[MIT License](LICENSE) · Attribution and origins: [NOTICE](NOTICE).

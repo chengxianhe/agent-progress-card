@@ -9,11 +9,12 @@ struct ChoiceFormView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(choice.fields ?? []) { field in
-                Text(field.title).font(.callout)
+                Text(field.title).font(.callout.weight(.medium))
                 let value = Binding<String>(get: { answers[field.id] ?? "" },
                                             set: { answers[field.id] = $0 })
                 if field.options.isEmpty {
                     TextField("填写回答", text: value).textFieldStyle(.roundedBorder)
+                        .controlSize(.large)
                 } else {
                     Picker("请选择", selection: value) {
                         Text("请选择").tag("")
@@ -26,10 +27,10 @@ struct ChoiceFormView: View {
                     try choice.submitForm(answers)
                     dismiss()
                 } catch { issue = "请填写全部问题，或稍后重试" }
-            }.buttonStyle(.borderedProminent)
+            }.buttonStyle(.borderedProminent).controlSize(.large)
             Text("回答作为本人聊天发送，不代交原生表单或授予工具权限。")
-                .font(.caption).foregroundStyle(.secondary)
-            if !issue.isEmpty { Text(issue).foregroundStyle(.orange) }
+                .font(.caption).foregroundStyle(GlimmerTheme.secondary)
+            if !issue.isEmpty { Text(issue).foregroundStyle(GlimmerTheme.warning) }
         }
     }
 }

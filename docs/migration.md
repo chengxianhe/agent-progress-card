@@ -15,3 +15,15 @@
 
 原有脚本中的 `min_agent_desktop` / `min_agent_wechat` 导入和 `python -m` 名称需改成新包名。
 新仓库不提供旧包名别名，避免意外从原 checkout 加载代码。
+
+## 微光应用包名称
+
+新构建输出为 `build/微光.app`，安装到 `~/Applications/微光.app`；bundle ID、内部可执行文件名、
+Python 包名与 Application Support 目录保持。新版启动时显式设置 Dock 图标。
+安装器遇到任何新名/旧名应用都会拒绝覆盖，旧名迁移需要受控备份与退出旧桌面采集器后再操作。
+
+旧名 `~/Applications/AgentProgressCard.app` 可保留为指向 `微光.app` 的固定路径符号链接，
+使既有微信常驻 PYTHONPATH 继续有效。迁移时需先核对两版 Python 资源完全一致，
+备份旧 App 和本机状态，核对绑定、凭据不变，避免将后台服务切到不同协议实现。
+桌面快捷方式指向新名应用；受控更新应只更新新名实际包，保留兼容链接。
+系统登记仅刷新这一个新名应用，不重置全部 LaunchServices 或其它 Dock 项。

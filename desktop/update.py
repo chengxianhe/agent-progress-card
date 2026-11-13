@@ -15,18 +15,21 @@ parser.add_argument("--expected-sha256", required=True)
 parser.add_argument("--pid", type=int, required=True)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
-source = root / "build/AgentProgressCard.app"
-target = Path.home() / "Applications/AgentProgressCard.app"
+source = root / "build/微光.app"
+target = Path.home() / "Applications/微光.app"
 executable = target / "Contents/MacOS/AgentProgressCard"
 if hashlib.sha256(executable.read_bytes()).hexdigest() != args.expected_sha256:
     raise SystemExit("已安装版本已变化，拒绝覆盖")
-process = subprocess.check_output(["/bin/ps", "-p", str(args.pid), "-o", "comm="], text=True).strip()
+process = subprocess.check_output(
+    ["/bin/ps", "-p", str(args.pid), "-o", "comm="], text=True,
+    env={**os.environ, "LC_ALL": "en_US.UTF-8"},
+).strip()
 if process != str(executable):
     raise SystemExit("进程与本轮卡片不匹配，拒绝停止")
 subprocess.run(["codesign", "--verify", "--strict", str(source)], check=True)
 token = uuid.uuid4().hex[:8]
-staged = target.with_name(f"AgentProgressCard-staged-{token}.app")
-backup = target.with_name(f"AgentProgressCard-backup-{token}.app")
+staged = target.with_name(f"微光-staged-{token}.app")
+backup = target.with_name(f"微光-backup-{token}.app")
 shutil.copytree(source, staged)
 subprocess.run(["codesign", "--verify", "--strict", str(staged)], check=True)
 os.kill(args.pid, signal.SIGTERM)

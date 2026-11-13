@@ -10,7 +10,7 @@ struct NativeQuestionView: View {
             Text(Date(timeIntervalSince1970: question.time), style: .date)
                 .font(.caption).foregroundStyle(.secondary)
             Text(question.text).font(.callout).textSelection(.enabled)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.glimmerSurface(GlimmerTheme.inset)
     }
 }
 
@@ -22,7 +22,11 @@ struct NativeQuestionSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView { NativeQuestionView(question: question) }
             Button("知道了，回原客户端回答") { dismiss() }.buttonStyle(.borderedProminent)
-        }.padding(18).frame(width: 340, height: 360)
+        }
+        .padding(18).frame(width: 340, height: 360)
+        .background(GlimmerTheme.canvas)
+        .foregroundStyle(GlimmerTheme.ink)
+        .tint(GlimmerTheme.accent)
     }
 }
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 CARD_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CARD_APP="$CARD_ROOT/build/AgentProgressCard.app"
+CARD_APP="$CARD_ROOT/build/微光.app"
 mkdir -p "$CARD_APP/Contents/MacOS" "$CARD_APP/Contents/Resources" "$CARD_ROOT/build/swift-cache"
 CARD_OVERLAY="$(python3 "$CARD_ROOT/desktop/swift-overlay.py")"
 xcrun swiftc -parse-as-library -O -module-cache-path "$CARD_ROOT/build/swift-cache" \
@@ -16,21 +16,25 @@ xcrun swiftc -parse-as-library -O -module-cache-path "$CARD_ROOT/build/swift-cac
   "$CARD_ROOT/desktop/WorkExplanationView.swift" \
   "$CARD_ROOT/desktop/TaskHistory.swift" "$CARD_ROOT/desktop/TaskFilters.swift" "$CARD_ROOT/desktop/TaskDashboard.swift" \
   "$CARD_ROOT/desktop/WeChatConnection.swift" \
+  "$CARD_ROOT/desktop/GlimmerTheme.swift" "$CARD_ROOT/desktop/CardView.swift" \
+  "$CARD_ROOT/desktop/GlimmerTitlebarAccessory.swift" \
   "$CARD_ROOT/desktop/AgentProgressCard.swift" \
   -o "$CARD_APP/Contents/MacOS/AgentProgressCard"
 mkdir -p "$CARD_APP/Contents/Resources/agent_progress_card" "$CARD_APP/Contents/Resources/agent_progress_wechat"
 cp "$CARD_ROOT"/src/agent_progress_card/*.py "$CARD_APP/Contents/Resources/agent_progress_card/"
 cp "$CARD_ROOT"/src/agent_progress_wechat/*.py "$CARD_APP/Contents/Resources/agent_progress_wechat/"
+bash "$CARD_ROOT/desktop/build-icon.sh" "$CARD_APP/Contents/Resources"
 cat > "$CARD_APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>AgentProgressCard</string>
 <key>CFBundleIdentifier</key><string>io.github.chengxianhe.agentprogresscard</string>
-<key>CFBundleName</key><string>任务卡片</string>
-<key>CFBundleDisplayName</key><string>任务卡片</string>
+<key>CFBundleName</key><string>微光</string>
+<key>CFBundleDisplayName</key><string>微光</string>
+<key>CFBundleIconFile</key><string>AppIcon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>

@@ -25,7 +25,7 @@ https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md
 先构建并安装已验证版本，再生成 launchd 配置：
 
 ```sh
-python3 desktop/resident-plist.py --app "$HOME/Applications/AgentProgressCard.app" \
+python3 desktop/resident-plist.py --app "$HOME/Applications/微光.app" \
   --card-dir "$HOME/Library/Application Support/AgentProgressCard" \
   --output /tmp/agent-progress-wechat.plist
 ```
