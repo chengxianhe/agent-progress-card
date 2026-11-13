@@ -52,8 +52,7 @@ final class HistoryModel: ObservableObject {
     @Published var tasks: [HistoryTask] = []
     @Published var issue = ""
     private var timer: Timer?
-    private let directory = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/AgentProgressCard")
+    private let directory = CardPaths.directory
 
     init() {
         reload()

@@ -85,6 +85,9 @@ class ResidentTests(unittest.TestCase):
         self.assertTrue(result['KeepAlive'])
         self.assertEqual(result['ThrottleInterval'], 30)
         self.assertEqual(result['ProgramArguments'][-1], '/tmp/card directory')
+        self.assertEqual(result['ProgramArguments'][0], '/Applications/Test App.app/Contents/MacOS/weiguang-cli')
+        self.assertNotIn('PYTHONPATH', result['EnvironmentVariables'])
+        self.assertEqual(result['EnvironmentVariables']['WEIGUANG_STATE_DIR'], '/tmp/card directory')
         self.assertNotIn('token', str(result))
         self.assertNotIn('credentials', str(result))
         with self.assertRaises(ValueError):

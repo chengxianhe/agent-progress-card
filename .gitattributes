@@ -1,0 +1,3 @@
+# Preserve upstream license texts byte for byte, including their original whitespace.
+# First-party source and documentation retain the normal whitespace checks.
+desktop/runtime/licenses/*.txt -whitespace

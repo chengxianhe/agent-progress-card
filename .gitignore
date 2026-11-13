@@ -24,3 +24,6 @@ wechat-source.json
 resident.json
 *.jsonl
 *.log
+
+# Upstream runtime license text, not a local database.
+!desktop/runtime/licenses/LICENSE.sqlite.txt

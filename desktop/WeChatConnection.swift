@@ -31,8 +31,7 @@ final class WeChatConnectionModel: ObservableObject {
     @Published var configured = false
     private var directory: URL?
     private var timer: Timer?
-    private let binding = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/AgentProgressCard/wechat-source.json")
+    private let binding = CardPaths.directory.appendingPathComponent("wechat-source.json")
 
     var connected: Bool { state?.status == "connected" && state?.send_paused != true && issue.isEmpty }
     var label: String {
@@ -102,8 +101,7 @@ final class WeChatConnectionModel: ObservableObject {
     func reconnect() {
         guard canReconnect, let directory, let thread = state?.thread_id else { return }
         do {
-            let cardDirectory = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/AgentProgressCard")
+            let cardDirectory = CardPaths.directory
             let data = try Data(contentsOf: cardDirectory.appendingPathComponent("activity-source.json"))
             guard data.count <= 16_384,
                   let source = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -111,19 +109,11 @@ final class WeChatConnectionModel: ObservableObject {
                 issue = "小看板已切换会话，请先切回原会话。"
                 return
             }
-            guard let resources = Bundle.main.resourceURL else { throw CocoaError(.fileNoSuchFile) }
+            let worker = try BundledPython.process(module: "agent_progress_wechat.relay", arguments: [
+                "--state-dir", directory.path, "--thread-id", thread,
+                "--card-dir", cardDirectory.path, "--reconnect"
+            ])
             guard write("reconnect-request", data: Data()), write("stop-request", data: Data()) else { return }
-            let worker = Process()
-            worker.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            worker.arguments = ["-m", "agent_progress_wechat.relay", "--state-dir", directory.path,
-                                "--thread-id", thread, "--card-dir", cardDirectory.path, "--reconnect"]
-            var environment = ProcessInfo.processInfo.environment
-            environment["PYTHONPATH"] = resources.path
-            environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            environment["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
-            worker.environment = environment
-            worker.standardOutput = FileHandle.nullDevice
-            worker.standardError = FileHandle.nullDevice
             try worker.run()
             issue = "正在停止旧连接并获取新二维码…"
         } catch { issue = "无法启动重新扫码，请检查本机权限。" }

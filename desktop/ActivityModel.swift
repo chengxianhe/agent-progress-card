@@ -8,26 +8,15 @@ final class ActivityModel: ObservableObject {
     @Published var now = Date()
     private var process: Process?
     private var timer: Timer?
-    private let file = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/AgentProgressCard/activity.json")
+    private let file = CardPaths.directory.appendingPathComponent("activity.json")
 
     init() {
-        if let resources = Bundle.main.resourceURL {
-            let worker = Process()
-            worker.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            worker.arguments = ["-m", "agent_progress_card.watcher"]
-            var environment = ProcessInfo.processInfo.environment
-            environment["PYTHONPATH"] = resources.path
-            environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            worker.environment = environment
-            worker.standardOutput = FileHandle.nullDevice
-            worker.standardError = FileHandle.nullDevice
-            do {
-                try worker.run()
-                process = worker
-            } catch {
-                issue = "记录读取程序未能启动"
-            }
+        do {
+            let worker = try BundledPython.process(module: "agent_progress_card.watcher")
+            try worker.run()
+            process = worker
+        } catch {
+            issue = "记录读取程序未能启动，请检查应用运行组件"
         }
         reload()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in

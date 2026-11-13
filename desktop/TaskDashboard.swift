@@ -127,6 +127,7 @@ struct TaskDashboard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(GlimmerTheme.ink)
         .tint(GlimmerTheme.accent)
+        .onChange(of: model.state?.task_id) { _ in selection = nil }
     }
 
     private func notice(_ text: String) -> some View {

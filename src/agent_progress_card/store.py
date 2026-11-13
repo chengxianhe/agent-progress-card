@@ -17,6 +17,12 @@ MAX_BYTES = 65536
 
 
 def default_directory() -> Path:
+    override = os.environ.get("WEIGUANG_STATE_DIR")
+    if override:
+        path = Path(override)
+        if not path.is_absolute():
+            raise ValueError("State directory must be absolute")
+        return path
     return Path.home() / "Library/Application Support/AgentProgressCard"
 
 

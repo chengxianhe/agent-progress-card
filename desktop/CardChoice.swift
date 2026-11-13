@@ -34,24 +34,14 @@ struct CardChoice: Decodable, Identifiable {
     }
 
     private func submitPayload(_ values: [String: Any]) throws {
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/AgentProgressCard")
+        let directory = CardPaths.directory
         let file = directory.appendingPathComponent("choice-selection.json")
         let payload = values.merging(["choice_id": id, "thread_id": thread_id,
                                       "created_at": Date().timeIntervalSince1970]) { _, new in new }
         let data = try JSONSerialization.data(withJSONObject: payload)
         try data.write(to: file, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        guard let resources = Bundle.main.resourceURL else { throw CocoaError(.fileNoSuchFile) }
-        let worker = Process()
-        worker.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        worker.arguments = ["-m", "agent_progress_wechat.card_choice"]
-        var environment = ProcessInfo.processInfo.environment
-        environment["PYTHONPATH"] = resources.path
-        environment["PYTHONDONTWRITEBYTECODE"] = "1"
-        worker.environment = environment
-        worker.standardOutput = FileHandle.nullDevice
-        worker.standardError = FileHandle.nullDevice
+        let worker = try BundledPython.process(module: "agent_progress_wechat.card_choice")
         try worker.run()
     }
 }

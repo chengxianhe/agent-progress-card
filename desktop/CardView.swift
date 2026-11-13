@@ -11,13 +11,15 @@ struct CardView: View {
     @State private var promptedChoiceID: String?
     @State private var promptedQuestionID: String?
     @State private var presentedPrompt: PromptPresentation?
+    @State private var pendingSetupThread: String?
+    @State private var checkedFirstRun = false
     let resize: (Bool) -> Void
     let pin: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            if wechat.configured { connection }
+            connection
             if showWeChat {
                 WeChatConnectionView(model: wechat).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -38,9 +40,37 @@ struct CardView: View {
             switch prompt {
             case .choice(let choice): ChoicePromptView(choice: choice)
             case .question(let question): NativeQuestionSheet(question: question)
+            case .setup:
+                FirstRunView { thread in
+                    pendingSetupThread = thread
+                    presentedPrompt = nil
+                    model.reload()
+                    history.reload()
+                }
+            case .wechatSetup:
+                WeChatSetupView {
+                    presentedPrompt = nil
+                    showWeChat = true
+                    wechat.reload()
+                }
+            }
+        }
+        .onAppear {
+            guard !checkedFirstRun else { return }
+            checkedFirstRun = true
+            if !FileManager.default.fileExists(atPath: CardPaths.directory.appendingPathComponent("activity-source.json").path) {
+                expanded = true
+                resize(true)
+                presentedPrompt = .setup
             }
         }
         .onReceive(activity.$feed) { feed in
+            if case .setup = presentedPrompt { return }
+            if case .wechatSetup = presentedPrompt { return }
+            if let expected = pendingSetupThread {
+                guard feed?.thread_id == expected else { return }
+                pendingSetupThread = nil
+            }
             guard let feed, feed.error.isEmpty else {
                 presentedPrompt = nil
                 return
@@ -74,6 +104,20 @@ struct CardView: View {
             }
             Spacer()
             Button {
+                expanded = true
+                resize(true)
+                presentedPrompt = .setup
+            } label: {
+                Image(systemName: "link").font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(GlimmerTheme.secondary)
+                    .frame(width: 27, height: 27)
+                    .background(GlimmerTheme.inset, in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain).help("连接 Codex 会话").accessibilityLabel("连接 Codex 会话")
+            .contextMenu {
+                Button("复制给助手的进度接入说明") { ProgressInstructions.copyToClipboard() }
+            }
+            Button {
                 pinned.toggle()
                 pin(pinned)
             } label: {
@@ -93,6 +137,12 @@ struct CardView: View {
 
     private var connection: some View {
         Button {
+            if !wechat.configured {
+                expanded = true
+                resize(true)
+                presentedPrompt = .wechatSetup
+                return
+            }
             showWeChat.toggle()
             if showWeChat && !expanded {
                 expanded = true
@@ -102,9 +152,10 @@ struct CardView: View {
             HStack(spacing: 7) {
                 Image(systemName: wechat.connected ? "checkmark.message.fill" : "message")
                     .foregroundStyle(wechat.connected ? GlimmerTheme.success : GlimmerTheme.secondary)
-                Text(wechat.label).lineLimit(2).multilineTextAlignment(.leading)
+                Text(wechat.configured ? wechat.label : "连接本人微信（可选）").lineLimit(2).multilineTextAlignment(.leading)
                 Spacer(minLength: 4)
-                Text(showWeChat ? "返回任务" : "设置").foregroundStyle(GlimmerTheme.secondary)
+                Text(showWeChat ? "返回任务" : wechat.configured ? "设置" : "扫码")
+                    .foregroundStyle(GlimmerTheme.secondary)
                 Image(systemName: showWeChat ? "chevron.up" : "chevron.right")
                     .font(.system(size: 8, weight: .semibold))
             }

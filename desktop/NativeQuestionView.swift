@@ -34,11 +34,15 @@ struct NativeQuestionSheet: View {
 enum PromptPresentation: Identifiable {
     case choice(CardChoice)
     case question(NativeQuestion)
+    case setup
+    case wechatSetup
 
     var id: String {
         switch self {
         case .choice(let choice): return "choice:" + choice.id
         case .question(let question): return "question:" + question.id
+        case .setup: return "setup"
+        case .wechatSetup: return "wechat-setup"
         }
     }
 }

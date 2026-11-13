@@ -10,8 +10,7 @@ final class CardModel: ObservableObject {
     private var timer: Timer?
 
     init() {
-        file = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/AgentProgressCard/state.json")
+        file = CardPaths.directory.appendingPathComponent("state.json")
         reload()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.reload() }

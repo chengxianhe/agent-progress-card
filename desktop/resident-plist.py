@@ -11,8 +11,8 @@ def configuration(app, card):
     if not app.is_absolute() or not card.is_absolute():
         raise ValueError('Absolute paths required')
     return {'Label': LABEL,
-            'ProgramArguments': ['/usr/bin/python3', '-B', '-m', 'agent_progress_wechat.resident', '--card-dir', str(card)],
-            'EnvironmentVariables': {'PYTHONPATH': str(app / 'Contents/Resources'), 'PYTHONDONTWRITEBYTECODE': '1',
+            'ProgramArguments': [str(app / 'Contents/MacOS/weiguang-cli'), '--resident', '--card-dir', str(card)],
+            'EnvironmentVariables': {'WEIGUANG_STATE_DIR': str(card), 'PYTHONDONTWRITEBYTECODE': '1',
                                      'SSL_CERT_FILE': '/etc/ssl/cert.pem'},
             'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 30, 'ExitTimeOut': 45,
             'ProcessType': 'Background'}
