@@ -11,6 +11,8 @@ Weiguang, formerly Agent Progress Card, brings one explicitly bound **Codex conv
 the current task, public work notes, tool activity and latest reply stay within reach. Optionally connect your
 own WeChat account to check progress, send tasks and answer supported choices or requests away from the desk.
 
+**The 0.2.0 preview** adds an embedded runtime, first-run connection guide, automatic creation of the first card task, and an optional graphical WeChat pairing entry.
+
 Work still runs in your existing Codex conversation. Displaying records and answering local status queries do not
 call another model. Sending tasks and choices incurs that conversation's normal model usage; Weiguang needs no separate model API key.
 
@@ -58,72 +60,54 @@ Ordinary chat answers and formal tool approvals use different handling.
 
 ## Quick start
 
-Run the following commands from this repository's root. Initial setup uses the terminal and builds locally.
+### Install a package
 
-### 1. Prepare and build
+Use **arm64 for Apple silicon** or **x86_64 for Intel**, on macOS 13+ with Codex installed.
+The app embeds Python 3.12: running a package needs **no Python installation, Xcode or source checkout**.
 
-You need **macOS 13+, Xcode Command Line Tools, Python 3.10+**, and an installed Codex client.
-The command-line packages use the Python standard library. The bundled collector uses CLT's `/usr/bin/python3`;
-that subset also supports Python 3.9.
+> Current 0.2.0 artifacts are **ad-hoc signed previews**, without Developer ID signing or Apple notarization.
+> macOS may block opening them. Previews have not been published to GitHub Releases; a normal public download awaits signing and notarization.
 
-If the build tools are missing, run `xcode-select --install` and complete installation first.
+Local packaging produces these files. **Pushing the source does not upload the DMGs**:
+
+| Your Mac | Package |
+| --- | --- |
+| Apple silicon (M series) | `Weiguang-0.2.0-macos-arm64-preview.dmg` |
+| Intel processor | `Weiguang-0.2.0-macos-x86_64-preview.dmg` |
+
+Both packages passed mounted-image and embedded-runtime checks. The Intel package was exercised under Rosetta on Apple silicon, not on physical Intel hardware.
+
+1. Open the DMG, drag 微光.app into `Applications`, then open it there.
+2. Send a message in your intended Codex conversation, then choose its transcript in the first-run guide.
+   The picker opens `~/.codex/sessions`; select that conversation's `rollout-….jsonl` by date.
+   Ask its assistant for the exact path if needed. Only the selected record is read.
+3. The conversation ID is detected automatically. Name the task and connect; the first card task is created for you.
+4. Copy the progress instructions and paste them into the same Codex conversation so the assistant can publish stages with the embedded CLI.
+
+Public notes, tools and replies refresh automatically; task stages and completion are still explicitly published.
+The link button in the header reopens setup. Switching requires confirmation when data exists, keeps old history,
+and does not cancel Codex work. An existing WeChat binding does not automatically follow a different conversation.
+
+### Build from source
+
+Developers need Xcode Command Line Tools, Python 3.10+ and network access.
+The first build downloads and verifies the pinned Python runtime.
 
 ```bash
 git clone https://github.com/chengxianhe/agent-progress-card.git
 cd agent-progress-card
 bash desktop/build.sh
-```
-
-This builds `build/微光.app` for your machine's architecture. It is ad-hoc signed, not Apple-notarized.
-
-### 2. Select and attach one Codex conversation
-
-Open the intended conversation in Codex and ensure it has started at least one task turn. Identify:
-
-| Parameter | Value |
-| --- | --- |
-| `--transcript` | The full path to that conversation's `rollout.jsonl` |
-| `--thread-id` | The UUID of the same conversation |
-
-If you do not know these values, ask the assistant in that conversation to help verify them; you do not need to
-share your whole chat directory. There is currently no graphical conversation-selection wizard.
-
-```bash
-# Replace both placeholders with values from the same conversation.
-PYTHONPATH=src python3 -m agent_progress_card.attach \
-  --transcript /absolute/path/to/rollout.jsonl \
-  --thread-id THREAD_UUID
-```
-
-Attachment validates the identity and collects public events from the latest task turn onward.
-It does not guess or switch to other conversations.
-
-### 3. Publish your first card task, then open the window
-
-**Attachment collects records; a user, assistant or script explicitly publishes the task title and status.**
-For your first task:
-
-```bash
-PYTHONPATH=src python3 -m agent_progress_card begin \
-  --title 'My first task' --action 'Waiting for a work update'
 open "build/微光.app"
 ```
 
-Keep the returned `task_id`. This creates a display record; start the actual work in the bound Codex conversation.
-Continue a task there: the card should show your title, then refresh public notes, tool records and replies.
-Use `update` for stages and status changes; see [publishing progress](#publish-progress-from-an-assistant-or-script).
-
-### 4. Install the app and keep it in the Dock
-
-After checking the local build, optionally install it:
+Build preview DMGs for both architectures:
 
 ```bash
-python3 desktop/install.py
-open "$HOME/Applications/微光.app"
+python3 desktop/package.py --arch both --preview
 ```
 
-The installer refuses to overwrite an existing new-name or old-name app. Read [migration instructions](docs/migration.md) before upgrading.
-Existing history, bindings and credentials retain their data locations. The application file and its Dock name are **微光**.
+Artifacts and `SHA256SUMS` go to `dist/`. Packaging does not install an app, replace an existing version,
+or publish to GitHub. See [distribution and signing](docs/distribution.md) for release requirements.
 
 To keep it in the bottom Dock, open the app, Control-click its icon and choose **Options → Keep in Dock**.
 See [Apple's Dock guide](https://support.apple.com/guide/mac-help/mh35859/mac).
@@ -137,16 +121,18 @@ WeChat background services are managed separately.
 **Skip this section if you only want the desktop card.** The relay uses the same already-open Codex conversation.
 Your account must support iLink/ClawBot, and the local Codex control socket must be available. Pairing availability depends on the service.
 
-After attaching the desktop card, keep that conversation open in Codex and run:
+After setup, keep the target conversation open. Click the optional WeChat row, then start pairing.
+The connection page shows the QR and any pairing-code prompt. Phone request handling is off by default;
+enable it explicitly before pairing if wanted. This does not install a login agent.
+Existing connections keep their credentials and settings; the guide does not migrate or overwrite them.
+For supervision, explicitly follow the [resident-service instructions](docs/wechat-resident.md).
+
+Advanced users can use the embedded CLI, replacing `THREAD_UUID` with the bound conversation ID:
 
 ```bash
-PYTHONPATH=src python3 -m agent_progress_wechat.relay \
-  --state-dir "$PWD/runs/wechat" --thread-id THREAD_UUID
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" --wechat \
+  --state-dir "$HOME/Library/Application Support/AgentProgressCard/wechat" --thread-id THREAD_UUID
 ```
-
-Scan the QR code in the card's connection settings and enter a pairing code if prompted.
-Initially this can run in the foreground; `Ctrl+C` stops that process. Install the optional
-[per-user supervisor](docs/wechat-resident.md) explicitly if you want background operation.
 
 | Send to your paired bot | What happens |
 | --- | --- |
@@ -173,19 +159,20 @@ See [WeChat details](docs/wechat.md) and [recovery behavior](docs/wechat-queue-p
 
 ## Publish progress from an assistant or script
 
-Give the assistant this command convention. Run from the Weiguang repository root and replace `TASK_ID` with the actual ID.
+The setup copy button includes your current task ID and actual app path; its header context menu can copy it again.
+These examples assume `/Applications`; replace `TASK_ID` with the actual ID.
 
 ```bash
 # Start a card task and retain its task_id.
-PYTHONPATH=src python3 -m agent_progress_card begin \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" begin \
   --title 'Update project docs' --action 'Check existing features'
 
 # Publish a stage.
-PYTHONPATH=src python3 -m agent_progress_card update \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" update \
   --task-id TASK_ID --status running --action 'Checking setup instructions'
 
 # Leave the result for human review.
-PYTHONPATH=src python3 -m agent_progress_card update \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" update \
   --task-id TASK_ID --status waiting --action 'Checks passed; ready for review'
 ```
 
@@ -195,7 +182,7 @@ Update the existing ID when a task is active. `begin --replace` explicitly switc
 Publish an ordinary choice:
 
 ```bash
-PYTHONPATH=src python3 -m agent_progress_card choice \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" choice \
   --question 'Which part first?' --option 'Improve the UI' --option 'Document setup'
 ```
 
@@ -206,7 +193,8 @@ Ambiguous delivery is not automatically repeated.
 
 | Symptom | Start here |
 | --- | --- |
-| The card keeps waiting for a task | Attaching is separate from creating a task; run `begin` and confirm the bound conversation is open |
+| Do other users need developer tools? | A complete package needs no Python, Xcode or checkout; macOS 13+, Codex and the target transcript are still required |
+| The card keeps waiting for a task | Complete the setup guide, which creates the first task, and confirm the selected conversation |
 | No task turn was found | Start at least one task turn in that Codex conversation; verify the path/UUID pair |
 | The title remains but records stop changing | It may be the last known state; check Codex, collector and binding, or send `诊断` in WeChat |
 | Phone notifications stop arriving | Send `进度` in your paired bot chat; an expired reply context is different from expired login |
@@ -225,13 +213,15 @@ Do not share credentials, QR codes, databases, raw chats or real conversation id
 - [WeChat setup and troubleshooting](docs/wechat.md) · [Phone approvals and forms](docs/remote-approvals.md)
 - [A/C reply routing](docs/mobile-approval-routing.md) · [Request coverage and recovery](docs/recovery-and-mobile-requests.md)
 - [Background supervision](docs/wechat-resident.md) · [Migration](docs/migration.md)
+- [Packages, signing and notarization](docs/distribution.md) · [First-run delivery record](docs/first-run-delivery-20261113.md)
 - [Verification](docs/verification.md) · [UI and naming decisions](docs/design-weiguang.md)
 
 ```bash
 bash scripts/verify.sh
 ```
 
-This macOS revision runs **212 Python tests, two native builds and eight model suites**.
+The 0.2.0 automated checks passed: **222 Python tests, two native builds and eight model suites**.
+Both preview DMGs also passed mounted-image, relocation and synthetic first-run checks. Developer ID signing, notarization and clean-machine installation remain unverified.
 Tests use synthetic data and do not send live WeChat messages. The user confirmed this local Dock icon and name;
 that does not establish live acceptance for every phone request. Formal forms, file changes and turn-scoped permissions
 retain their individual [verification limits](docs/verification.md). The local Codex interface is experimental; revalidate after client upgrades.
@@ -239,4 +229,4 @@ retain their individual [verification limits](docs/verification.md). The local C
 Sources: `desktop/` for native UI/build tools, `src/agent_progress_card/` for collection and records,
 `src/agent_progress_wechat/` for the relay, and `tests/` for regression coverage.
 
-[MIT License](LICENSE) · Attribution and origins: [NOTICE](NOTICE).
+[MIT License](LICENSE) · Attribution and origins: [NOTICE](NOTICE) · [Bundled runtime notices](THIRD_PARTY_NOTICES.md).

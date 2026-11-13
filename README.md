@@ -10,6 +10,8 @@
 微光（原名 Agent Progress Card）把一个明确绑定的 **Codex 会话**放到桌面上：当前任务、公开工作说明、工具调用和最近回复随时可见。
 需要离开电脑时，还可以连接本人微信，查进度、发任务，并回复已支持的选择与请求。
 
+**0.2.0 预览版**已加入内置运行环境、首次连接引导和首个任务自动创建；可选微信扫码也有图形入口。
+
 任务仍由原有 Codex 会话执行。桌面记录和本地查询不额外调用模型；发任务与回复选择使用该会话的正常模型用量，无需为微光另配模型 API Key。
 
 ## 它可以帮你做什么
@@ -54,69 +56,53 @@
 
 ## 快速开始
 
-以下命令均在本仓库根目录执行。首次使用需要终端，当前流程是本机构建。
+### 安装包使用（普通用户）
 
-### 1. 准备并构建
+选择与你的 Mac 对应的 DMG：**Apple 芯片用 arm64，Intel 用 x86_64**。需要 macOS 13+ 和已安装的 Codex 客户端。
+App 已内置 Python 3.12，使用安装包**不需要安装 Python、Xcode 或克隆源码**。
 
-需要 **macOS 13+、Xcode Command Line Tools、Python 3.10+**，以及已安装的 Codex 客户端。
-命令行包使用 Python 标准库；App 内置采集入口使用 CLT 的 `/usr/bin/python3`，该子集兼容 Python 3.9。
+> 当前产物是 **0.2.0 预览版**，仅 ad-hoc 签名，尚未经过 Apple Developer ID 签名和公证，macOS 可能拦截打开。
+> 预览包还未发布到 GitHub Releases；面向普通用户的正式下载须等签名、公证完成后提供。
 
-缺少编译工具时先执行 `xcode-select --install`，完成安装后继续：
+本地构建会生成以下安装包；**推送源码不会同时上传这些 DMG**：
+
+| 你的 Mac | 对应安装包 |
+| --- | --- |
+| Apple 芯片（M 系列） | `Weiguang-0.2.0-macos-arm64-preview.dmg` |
+| Intel 处理器 | `Weiguang-0.2.0-macos-x86_64-preview.dmg` |
+
+两个包都已做挂载与内置运行环境测试；Intel 包是在 Apple 芯片 Mac 的 Rosetta 下验证，尚未做真实 Intel 硬件验收。
+
+1. 打开 DMG，把「微光.app」拖到 `Applications`，再从应用目录打开。
+2. 首次引导中，在 Codex 的目标对话先发一条消息，再点击「选择会话记录」。
+   文件选择器默认打开 `~/.codex/sessions`，按日期选择该对话的一份 `rollout-….jsonl`。
+   不知道对应文件时，请该对话的助手提供路径；微光只读取你选中的文件。
+3. 会话编号自动识别，给任务取名后点击「连接并开始记录」，首个任务会自动创建。
+4. 点击「复制给助手的进度接入说明」，粘贴到同一个 Codex 对话，助手即可用内置 CLI 更新任务阶段。
+
+公开说明、工具和回复会自动采集；任务阶段与完成状态仍由助手显式发布。
+重新选择会话可点窗口顶部的连接按钮，已有数据时需确认切换，旧任务记录会保留。
+切换不会取消 Codex 的工作；原微信绑定不会自动跟随另一个会话。
+
+### 从源码构建（开发者）
+
+构建需要 Xcode Command Line Tools、Python 3.10+ 和网络。首次构建会下载校验过的固定版本 Python 运行环境。
 
 ```bash
 git clone https://github.com/chengxianhe/agent-progress-card.git
 cd agent-progress-card
 bash desktop/build.sh
-```
-
-构建生成 `build/微光.app`，按本机架构编译并使用 ad-hoc 签名，未经过 Apple 公证。
-
-### 2. 选择并绑定一个 Codex 会话
-
-在 Codex 中打开你要跟进的对话，并确保该会话已开始过至少一轮任务。确认这一个会话的：
-
-| 参数 | 填什么 |
-| --- | --- |
-| `--transcript` | 该会话对应的 `rollout.jsonl` 完整路径 |
-| `--thread-id` | 同一会话的 UUID |
-
-不知道这两个值时，先请当前对话的助手协助核对；无需提供整个聊天目录。微光当前没有自动选择会话的图形向导。
-
-```bash
-# 将路径和 THREAD_UUID 替换为同一会话的真实值。
-PYTHONPATH=src python3 -m agent_progress_card.attach \
-  --transcript /absolute/path/to/rollout.jsonl \
-  --thread-id THREAD_UUID
-```
-
-绑定会校验会话身份，从最近一轮及后续公开事件开始采集，不会自动猜测其他对话。
-
-### 3. 发布第一个看板任务，再打开窗口
-
-**绑定负责采集记录；任务标题和状态由你、助手或脚本显式发布。** 首次可先运行：
-
-```bash
-PYTHONPATH=src python3 -m agent_progress_card begin \
-  --title '我的第一个任务' --action '等待新的工作说明'
 open "build/微光.app"
 ```
 
-保留 `begin` 返回的 `task_id`。这条命令只创建显示记录，实际工作仍需在绑定的 Codex 对话中发起。
-
-接着在该对话继续一轮任务：窗口应出现你发布的任务标题，公开说明、工具记录和回复会随采集刷新。
-后续用 `update` 更新阶段与状态，完整示例见下方[让助手或脚本更新进度](#让助手或脚本更新进度)。
-
-### 4. 安装到应用目录，固定到 Dock
-
-本地构建确认可用后，可选安装：
+构建结果与安装包使用同一套首次引导。生成两种架构的预览 DMG：
 
 ```bash
-python3 desktop/install.py
-open "$HOME/Applications/微光.app"
+python3 desktop/package.py --arch both --preview
 ```
 
-安装器遇到已有「微光」或旧名应用会拒绝覆盖；升级先读[迁移说明](docs/migration.md)。
-已有任务、会话绑定和微信凭据继续使用原有数据目录，应用文件名与 Dock 显示名均为**微光**。
+输出到 `dist/`，包含 `SHA256SUMS`；不会安装 App、覆盖现有版本或发布到 GitHub。
+正式签名、公证及验收范围见[发行说明](docs/distribution.md)。
 
 要固定到底部 Dock，打开 App 后右键点按其图标，选择「选项 → 在程序坞中保留」。
 这是 macOS 的常规操作，见 [Apple 程序坞说明](https://support.apple.com/zh-cn/guide/mac-help/mh35859/mac)。
@@ -129,15 +115,17 @@ open "$HOME/Applications/微光.app"
 **只想用桌面看板，可以跳过这一节。** 微信通道连接同一个已打开的 Codex 对话，不另开聊天上下文。
 账号需要支持 iLink/ClawBot，且本机 Codex 控制 socket 可用；是否可配对以实际服务返回为准。
 
-完成桌面绑定后，保持目标会话在 Codex 客户端中打开，运行：
+完成首次引导后，保持目标会话打开，点卡片上的「连接本人微信（可选）」，再点「开始扫码连接」。
+二维码和配对码会显示在连接页。首次默认关闭手机正式请求适配，可在扫码前显式勾选。
+不会自动安装登录自启动项；需要后台监督时，再按[常驻说明](docs/wechat-resident.md)显式安装。
+已有连接继续使用原凭据和设置，图形引导不会自动迁移或覆盖它们。
+
+高级用户也可通过 App 自带 CLI 启动，`THREAD_UUID` 替换为已绑定会话编号：
 
 ```bash
-PYTHONPATH=src python3 -m agent_progress_wechat.relay \
-  --state-dir "$PWD/runs/wechat" --thread-id THREAD_UUID
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" --wechat \
+  --state-dir "$HOME/Library/Application Support/AgentProgressCard/wechat" --thread-id THREAD_UUID
 ```
-
-在微光的「连接设置」中扫码，并按提示输入配对码。首次启动可在前台运行，`Ctrl+C` 可停止此进程。
-需要后台监督时，再按[常驻说明](docs/wechat-resident.md)显式安装。
 
 | 在本人机器人会话发送 | 你能做什么 |
 | --- | --- |
@@ -159,19 +147,20 @@ PYTHONPATH=src python3 -m agent_progress_wechat.relay \
 
 ## 让助手或脚本更新进度
 
-可以把下面的命令约定交给处理该任务的助手。所有命令在微光仓库根目录执行；用实际 `task_id` 替换 `TASK_ID`。
+首次引导的复制按钮会包含当前任务 ID 和实际 App 路径；窗口顶部连接按钮的右键菜单也可再次复制。
+下面示例假设安装在 `/Applications`，用实际 `task_id` 替换 `TASK_ID`。
 
 ```bash
 # 开始任务，返回 task_id。
-PYTHONPATH=src python3 -m agent_progress_card begin \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" begin \
   --title '更新项目文档' --action '核对现有功能'
 
 # 发布一个阶段。
-PYTHONPATH=src python3 -m agent_progress_card update \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" update \
   --task-id TASK_ID --status running --action '正在核对使用步骤'
 
 # 留给人确认。
-PYTHONPATH=src python3 -m agent_progress_card update \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" update \
   --task-id TASK_ID --status waiting --action '检查完成，等待你审阅'
 ```
 
@@ -181,7 +170,7 @@ PYTHONPATH=src python3 -m agent_progress_card update \
 发布一个普通选择：
 
 ```bash
-PYTHONPATH=src python3 -m agent_progress_card choice \
+"/Applications/微光.app/Contents/MacOS/weiguang-cli" choice \
   --question '先做哪项？' --option '优化界面' --option '补充文档'
 ```
 
@@ -192,7 +181,8 @@ PYTHONPATH=src python3 -m agent_progress_card choice \
 
 | 问题 | 先检查什么 |
 | --- | --- |
-| 打开后一直等待任务 | 绑定不等于创建任务；先执行 `begin`，并确认打开的是绑定会话 |
+| 别人需要安装开发环境吗 | 使用完整安装包无需 Python、Xcode 或源码；仍需 macOS 13+、Codex 和目标会话记录 |
+| 打开后一直等待任务 | 完成首次引导并确认是目标会话；引导会自动创建首个任务 |
 | 提示「未找到会话轮次」 | 该 Codex 会话须先开始过一轮任务，路径和 UUID 也必须匹配 |
 | 标题还在，记录不刷新 | 卡片可能是最后记录；检查 Codex、采集状态与绑定，微信可发 `诊断` |
 | 微信收不到通知 | 先在本人机器人会话发送 `进度`；回信上下文失效与登录失效不同，按连接状态处理 |
@@ -210,16 +200,18 @@ PYTHONPATH=src python3 -m agent_progress_card choice \
 - [微信连接与故障处理](docs/wechat.md) · [手机授权与表单](docs/remote-approvals.md)
 - [手机编号分流](docs/mobile-approval-routing.md) · [请求覆盖与恢复边界](docs/recovery-and-mobile-requests.md)
 - [后台常驻](docs/wechat-resident.md) · [旧版本迁移](docs/migration.md)
+- [安装包、签名与公证](docs/distribution.md) · [首次使用交付记录](docs/first-run-delivery-20261113.md)
 - [验证记录](docs/verification.md) · [界面设计与更名记录](docs/design-weiguang.md)
 
 ```bash
 bash scripts/verify.sh
 ```
 
-本轮 macOS 检查包含 **212 项 Python 测试、两个原生入口构建和 8 组模型测试**。
+0.2.0 本轮自动检查通过：**222 项 Python 测试、两个原生入口构建和 8 组模型测试**。
+两种预览安装包另通过挂载、运行环境搬迁和合成会话首次连接检查；正式签名、公证及干净机器安装仍待验证。
 自动测试使用合成数据，不向真实微信发送消息。本机 Dock 图标与名称已由用户确认；这不等于所有手机请求均已实测。
 正式表单、文件修改、本轮权限等仍按各自[验证边界](docs/verification.md)看待。Codex 本地接口属于实验性适配，升级客户端后需复验。
 
 源码：`desktop/` 原生界面与构建，`src/agent_progress_card/` 记录与采集，`src/agent_progress_wechat/` 微信桥接，`tests/` 回归。
 
-[MIT License](LICENSE) · 原始来源与归属见 [NOTICE](NOTICE)。
+[MIT License](LICENSE) · 原始来源见 [NOTICE](NOTICE) · 内置运行环境见 [第三方声明](THIRD_PARTY_NOTICES.md)。
